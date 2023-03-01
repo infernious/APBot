@@ -62,7 +62,7 @@ class EventConfirm(discord.ui.View):
 class QuestionConfirm(discord.ui.View):
 
     def __init__(self, bot, message):
-        super().__init__()
+        super().__init__(timeout=None)
         self.bot = bot
         self.message = message
 
