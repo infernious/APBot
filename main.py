@@ -27,7 +27,8 @@ class APBot(commands.Bot):
                               'cogs.modmail',
                               'cogs.miscellaneous',
                               'cogs.rolereact',
-                              'cogs.errorhandler'
+                              'cogs.errorhandler',
+                              'cogs.threads'
                               ]
         for extension in initial_extensions:
             await self.load_extension(extension)
