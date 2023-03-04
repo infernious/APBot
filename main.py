@@ -23,11 +23,12 @@ class APBot(commands.Bot):
         )
 
     async def setup_hook(self) -> None:
-        initial_extensions = ['cogs.moderation',
+        initial_extensions = ['cogs.errorhandler',
+                              'cogs.events',
+                              'cogs.moderation',
                               'cogs.modmail',
-                              'cogs.miscellaneous',
                               'cogs.rolereact',
-                              'cogs.errorhandler',
+                              'cogs.study',
                               'cogs.threads'
                               ]
         for extension in initial_extensions:

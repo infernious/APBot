@@ -8,57 +8,6 @@ from cogs.moderation import convert
 blue = 0x00ffff
 
 
-class EventAnnouncement(discord.ui.View):
-
-    def __init__(self, bot):
-        super().__init__()
-        self.bot = bot
-
-    @discord.ui.button(label='Click here to be notified for future events!', style=discord.ButtonStyle.gray)
-    async def callback(self, interaction, button):
-
-        """
-        Give the "Lounge: Events" role to the interaction user.
-        """
-
-        role = discord.utils.get(interaction.guild.roles, name="Lounge: Events")
-        member = interaction.guild.get_member(interaction.user.id)
-
-        if role in member.roles:
-            await member.remove_roles(role)
-            await interaction.response.send_message(f"`{role.name}` role removed!", ephemeral=True)
-        else:
-            await member.add_roles(role)
-            await interaction.response.send_message(f"`{role.name}` role added!", ephemeral=True)
-
-
-class EventConfirm(discord.ui.View):
-
-    def __init__(self, bot):
-        super().__init__()
-        self.bot = bot
-
-    @discord.ui.button(label='Confirm!', emoji='✅', style=discord.ButtonStyle.green)
-    async def callback(self, interaction, button):
-
-        """
-        Confirm mention after command is used as to avoid accidental pings.
-        """
-
-        event_role = discord.utils.get(interaction.guild.roles, name="Lounge: Events")
-        event_channel = discord.utils.get(interaction.guild.channels, name="events")
-
-        await event_channel.send(f"{event_role.mention}", view=EventAnnouncement(self.bot))
-
-        button.style = discord.ButtonStyle.grey
-        button.label = "Event announced!"
-        button.disabled = True
-
-        await interaction.response.edit_message(view=self)
-
-        self.stop()
-
-
 class QuestionConfirm(discord.ui.View):
 
     def __init__(self, bot, message):
@@ -95,8 +44,7 @@ class QuestionConfirm(discord.ui.View):
         await self.message.edit(view=self)
 
 
-class Miscellaneous(commands.Cog):
-    """Send messages to other users"""
+class Study(commands.Cog):
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
@@ -232,12 +180,6 @@ class Miscellaneous(commands.Cog):
                                                 f"{discord.utils.format_dt(time_until_dt, style='f')}.",
                                                 ephemeral=True)
 
-    @app_commands.checks.has_role("Event Coordinator")
-    @app_commands.command(name='eventannounce', description='Announce an event in the #events channel.')
-    async def eventannounce(self, interaction: discord.Interaction):
-
-        await interaction.response.send_message("Please confirm that you would like to **ping the events role** in the events channel.", view=EventConfirm(self.bot))
-
     @tasks.loop(minutes=5)
     async def check_studiers(self):
 
@@ -264,4 +206,4 @@ class Miscellaneous(commands.Cog):
 
 
 async def setup(bot):
-    await bot.add_cog(Miscellaneous(bot), guilds=[discord.Object(id=bot.guild_id)])
+    await bot.add_cog(Study(bot), guilds=[discord.Object(id=bot.guild_id)])
