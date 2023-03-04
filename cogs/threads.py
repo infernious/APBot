@@ -1,4 +1,5 @@
 import discord
+from discord import app_commands
 from discord.ext import commands
 import asyncio
 
@@ -71,6 +72,23 @@ class Threads(commands.Cog):
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
+
+    @app_commands.command(name='resolve', description='Mark a forum post as resolved and archive it.')
+    async def resolve(self, interaction: discord.Interaction):
+
+        """
+        Mark a thread as resolved to archive it.
+            - Allows non-authors to resolve a post.
+        """
+
+        resolve_embed = discord.Embed(title='', color=blue)
+        resolve_embed.add_field(name='Resolved ✅', value=f'Post marked as resolved by {interaction.user.mention}.')
+        await interaction.response.send_message(embed=resolve_embed)
+
+        resolve_tag = discord.utils.get(interaction.channel.parent.available_tags, name='Resolved')
+        await interaction.channel.add_tags(resolve_tag)
+        await interaction.channel.edit(archived=True)
+
 
     @commands.Cog.listener()
     async def on_thread_create(self, thread):
