@@ -98,6 +98,9 @@ class Threads(commands.Cog):
         - After 10 minutes, provides an option to ping helpers.
         """
 
+        if thread.parent.name == "modmail":
+            return
+
         await asyncio.sleep(1)
         await thread.starter_message.pin()
 
