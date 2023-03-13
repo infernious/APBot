@@ -189,7 +189,7 @@ class Moderation(commands.Cog):
             chat_mod = discord.utils.get(guild.roles, name='Chat Moderator')
 
             ban_warn_embed = discord.Embed(title='', color=red)
-            ban_warn_embed.add_field(name='Member reached or surpassed 30 infraction points!',
+            ban_warn_embed.add_field(name='Member has reached 30 infraction points!',
                                      value=f'{member.mention} has {member_config["infraction_points"]} infraction points and should be reviewed for a ban.')
 
             await update.send(f"{chat_mod.mention}", embed=ban_warn_embed)
@@ -553,7 +553,7 @@ class Moderation(commands.Cog):
             chat_mod = discord.utils.get(guild.roles, name='Chat Moderator')
 
             ban_warn_embed = discord.Embed(title='', color=red)
-            ban_warn_embed.add_field(name='Member reached or surpassed 30 infraction points!',
+            ban_warn_embed.add_field(name='Member has reached 30 infraction points!',
                                      value=f'{member.mention} has {member_config["infraction_points"]} infraction points'
                                            f' and should be reviewed for a ban.')
 
