@@ -64,7 +64,7 @@ class Modmail(commands.Cog):
                     thread = await guild.fetch_channel(user_config["modmail_id"])
                     await thread.send(embed=modmail_embed)
                     await thread.starter_message.clear_reactions()
-                except (KeyError, discord.errors.NotFound):
+                except (KeyError, discord.errors.NotFound, discord.errors.Forbidden):
                     modmail = discord.utils.get(guild.channels, name="modmail")
                     create_thread = await modmail.create_thread(
                         name=f"{message.author.name}#{message.author.discriminator}: {message.author.id}",
