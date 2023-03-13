@@ -58,6 +58,8 @@ class Moderation(commands.Cog):
             - Adds infraction to infraction history.
         """
 
+        await interaction.response.defer()
+
         warn_message = discord.Embed(title='', color=yellow)
         warn_message.add_field(name='You have been warned!', value=f'Reason: {reason}', inline=False)
         warn_message.timestamp = datetime.datetime.now()
@@ -83,7 +85,7 @@ class Moderation(commands.Cog):
         except Exception:
             warn_log.set_footer(text=f"Could not DM warn message.")
 
-        await interaction.response.send_message(embed=warn_response)
+        await interaction.followup.send(embed=warn_response)
         guild = self.bot.get_guild(self.bot.guild_id)
         logs = discord.utils.get(guild.channels, name="logs")
         await logs.send(embed=warn_log)
@@ -114,6 +116,8 @@ class Moderation(commands.Cog):
             - Adds infraction points based on duration of mute.
             - Checks if infraction points exceed 30, and if so, notifies Chat Moderators.
         """
+
+        await interaction.response.defer()
 
         seconds = await convert(duration)
         time_until = datetime.timedelta(seconds=seconds)
@@ -166,7 +170,7 @@ class Moderation(commands.Cog):
         except Exception:
             mute_log.set_footer(text=f"Could not DM mute message.")
 
-        await interaction.response.send_message(embed=mute_response)
+        await interaction.followup.send(embed=mute_response)
         guild = self.bot.get_guild(self.bot.guild_id)
         logs = discord.utils.get(guild.channels, name="logs")
         await logs.send(embed=mute_log)
@@ -204,6 +208,9 @@ class Moderation(commands.Cog):
             - Times out offender.
             - NOT saved to infraction history.
         """
+
+        await interaction.response.defer()
+
         seconds = await convert(duration)
         time_until = datetime.timedelta(seconds=seconds)
         time_until_dt = time_until + datetime.datetime.now()
@@ -241,7 +248,7 @@ class Moderation(commands.Cog):
         except Exception:
             mute_log.set_footer(text=f"Could not DM mute message.")
 
-        await interaction.response.send_message(embed=mute_response)
+        await interaction.followup.send(embed=mute_response)
         guild = self.bot.get_guild(self.bot.guild_id)
         logs = discord.utils.get(guild.channels, name="logs")
         await logs.send(embed=mute_log)
@@ -257,21 +264,23 @@ class Moderation(commands.Cog):
             - Updates infraction history by editing the most recent infraction if it's a mute.
         """
 
+        await interaction.response.defer()
+
         await member.timeout(None, reason=reason)
 
-        unmute_message = discord.Embed(title='', color=light_orange)
+        unmute_message = discord.Embed(title='', color=green)
         unmute_message.add_field(name='You have been unmuted!',
                                value=f'Reason: {reason}',
                                inline=False)
         unmute_message.timestamp = datetime.datetime.now()
 
-        unmute_log = discord.Embed(title=f"{member.name}#{member.discriminator} has been unmuted.", color=light_orange)
+        unmute_log = discord.Embed(title=f"{member.name}#{member.discriminator} has been unmuted.", color=green)
         unmute_log.add_field(name=f"Reason: ", value=reason, inline=False)
         unmute_log.add_field(name=f"User ID:", value=f"{member.id} ({member.mention})", inline=False)
         unmute_log.add_field(name=f"Responsible Moderator: ", value=f"{interaction.user.name}#{interaction.user.discriminator} ({interaction.user.mention})", inline=False)
         unmute_log.timestamp = datetime.datetime.now()
 
-        unmute_response = discord.Embed(title=f"", color=light_orange)
+        unmute_response = discord.Embed(title=f"", color=green)
         unmute_response.add_field(name=f"Member unmuted!", value=f"{member.mention} has been unmuted.", inline=False)
         unmute_response.add_field(name=f"Reason:", value=reason)
         unmute_response.timestamp = datetime.datetime.now()
@@ -286,7 +295,7 @@ class Moderation(commands.Cog):
         except Exception:
             unmute_log.set_footer(text=f"Could not DM unmute message.")
 
-        await interaction.response.send_message(embed=unmute_response)
+        await interaction.followup.send(embed=unmute_response)
         guild = self.bot.get_guild(self.bot.guild_id)
         logs = discord.utils.get(guild.channels, name="logs")
         await logs.send(embed=unmute_log)
@@ -314,6 +323,8 @@ class Moderation(commands.Cog):
             - Generates an embed/message for response and mod-log.
             - Adds infraction to infraction history.
         """
+
+        await interaction.response.defer()
 
         kick_message = discord.Embed(title='', color=dark_orange)
         kick_message.add_field(name='You have been kicked!', value=f'Reason: {reason}', inline=False)
@@ -343,7 +354,7 @@ class Moderation(commands.Cog):
         # Kick the member AFTER the message is sent.
         await interaction.guild.kick(member, reason=reason)
 
-        await interaction.response.send_message(embed=kick_response)
+        await interaction.followup.send(embed=kick_response)
         guild = self.bot.get_guild(self.bot.guild_id)
         logs = discord.utils.get(guild.channels, name="logs")
         await logs.send(embed=kick_log)
@@ -370,6 +381,8 @@ class Moderation(commands.Cog):
             - Generates an embed/message for response and mod-log.
             - Adds infraction to infraction history.
         """
+
+        await interaction.response.defer()
 
         ban_message = discord.Embed(title='', color=red)
         ban_message.add_field(name='You have been banned!',
@@ -401,7 +414,7 @@ class Moderation(commands.Cog):
         # Ban AFTER message is sent.
         await interaction.guild.ban(member, reason=reason)
 
-        await interaction.response.send_message(embed=ban_response)
+        await interaction.followup.send(embed=ban_response)
         guild = self.bot.get_guild(self.bot.guild_id)
         logs = discord.utils.get(guild.channels, name="logs")
         await logs.send(embed=ban_log)
@@ -429,6 +442,8 @@ class Moderation(commands.Cog):
             - Adds infraction to infraction history.
         """
 
+        await interaction.response.defer()
+
         try:
             member_id = int(member_id)
         except:
@@ -452,7 +467,7 @@ class Moderation(commands.Cog):
             ban_log.set_image(url=attachment.proxy_url)
             ban_response.set_image(url=attachment.proxy_url)
 
-        await interaction.response.send_message(embed=ban_response)
+        await interaction.followup.send(embed=ban_response)
         guild = self.bot.get_guild(self.bot.guild_id)
         logs = discord.utils.get(guild.channels, name="logs")
         await logs.send(embed=ban_log)
