@@ -136,10 +136,6 @@ class ModerationCommands(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-    @app_commands.command(name='test', description="testing modals")
-    async def test(self, interaction: discord.Interaction):
-        await interaction.response.send_message("test", view=BanAppealButton(self.bot))
-
     @app_commands.checks.has_permissions(moderate_members=True)
     @app_commands.command(name='warn', description="Warn members of rule-breaking behavior.")
     async def warn(self, interaction: discord.Interaction, member: discord.Member, *, reason: str, attachment: discord.Attachment = None):
