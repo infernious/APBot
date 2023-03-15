@@ -10,7 +10,7 @@ import motor.motor_asyncio as motor
 
 yellow = 0xffff00
 orange = 0xffa500
-light_orange = 0xf6b26b
+light_orange = 0xffa07a
 dark_orange = 0xff5733
 red = 0xff0000
 green = 0x00ff00
@@ -42,11 +42,103 @@ async def convert(argument):
     return time
 
 
-class Moderation(commands.Cog):
+class BanAppeal(discord.ui.Modal, title="Ban Appeal"):
+
+    def __init__(self, bot):
+        super().__init__()
+        self.bot = bot
+
+    appeal = discord.ui.TextInput(
+        label="Ban Appeal",
+        style=discord.TextStyle.long,
+        placeholder="Why should your ban be appealed? We recommend waiting 1-2 weeks before answering this question.",
+        required=True,
+        max_length=750,
+    )
+
+    media = discord.ui.TextInput(
+        label = "Supporting Media",
+        style=discord.TextStyle.long,
+        placeholder='Feel free to send links to supporting media here.',
+        required=False,
+        max_length=150,
+    )
+
+    miscellaneous = discord.ui.TextInput(
+        label="Anything else?",
+        style=discord.TextStyle.long,
+        placeholder='Is there anything else you would like us to know?',
+        required=False,
+        max_length=750,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+
+        await interaction.response.send_message(f"Your appeal has been sent!")
+
+        guild = self.bot.get_guild(self.bot.guild_id)
+        appeal_channel = discord.utils.get(guild.channels, name="important-updates")
+        appeal_embed = discord.Embed(title="Ban Appeal", color=light_orange)
+        appeal_embed.add_field(name="User:", value=f"{interaction.user.name}#{interaction.user.discriminator}")
+        appeal_embed.add_field(name="ID:", value=f"{interaction.user.id}", inline = False)
+        appeal_embed.add_field(name="Appeal:", value=f"```\n{self.appeal.value}\n```", inline = False)
+        if self.media.value:
+            appeal_embed.add_field(name="Media Links:", value=f"{self.media.value}", inline = False)
+        if self.miscellaneous.value:
+            appeal_embed.add_field(name="Additional Information:", value=f"```\n{self.miscellaneous.value}\n```", inline = False)
+        appeal_embed.timestamp = datetime.datetime.now()
+
+        user_config = await self.bot.read_user_config(interaction.user.id)
+
+        if "appeal_message_id" in user_config:
+            appeal_message = await appeal_channel.fetch_message(user_config["appeal_message_id"])
+            appeal_thread = discord.utils.get(appeal_message.channel.threads, name=f"{interaction.user.name}#{interaction.user.discriminator} ({interaction.user.id}) Ban Appeal")
+            await appeal_thread.send("Appeal has been updated!", embed=appeal_embed)
+        else:
+            appeal_message = await appeal_channel.send(embed=appeal_embed)
+            await appeal_message.add_reaction("🟢")
+            await appeal_message.add_reaction("🟡")
+            await appeal_message.add_reaction("🔴")
+            await appeal_message.create_thread(name=f"{interaction.user.name}#{interaction.user.discriminator} ({interaction.user.id}) Ban Appeal")
+            user_config["appeal_message_id"] = appeal_message.id
+
+        user_config["check_appeal_date"] = datetime.datetime.now() + datetime.timedelta(days=14)
+        await self.bot.update_user_config(interaction.user.id, user_config)
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
+        await interaction.response.send_message('Oops! Something went wrong.', ephemeral=True)
+
+
+class BanAppealButton(discord.ui.View):
+
+    def __init__(self, bot):
+        super().__init__(timeout=None)
+        self.bot = bot
+
+    @discord.ui.button(label='Appeal Ban', style=discord.ButtonStyle.grey)
+    async def callback(self, interaction, button):
+        """
+        Confirm to appeal ban to bring up the modal.
+        """
+
+        await interaction.response.send_modal(BanAppeal(self.bot))
+
+    async def on_timeout(self) -> None:
+        self.callback.style = discord.ButtonStyle.grey
+        self.callback.label = "Timed out!"
+        self.callback.disabled = True
+
+        await self.message.edit(view=self)
+
+
+class ModerationCommands(commands.Cog):
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
-        self.decay.start()
+
+    @app_commands.command(name='test', description="testing modals")
+    async def test(self, interaction: discord.Interaction):
+        await interaction.response.send_message("test", view=BanAppealButton(self.bot))
 
     @app_commands.checks.has_permissions(moderate_members=True)
     @app_commands.command(name='warn', description="Warn members of rule-breaking behavior.")
@@ -386,8 +478,7 @@ class Moderation(commands.Cog):
 
         ban_message = discord.Embed(title='', color=red)
         ban_message.add_field(name='You have been banned!',
-                              value=f'''Reason: {reason}
-                                        You can submit an appeal here: https://forms.gle/jbfpFcA7PVegjYT56''',
+                              value=f'Reason: {reason}',
                               inline=False)
         ban_message.timestamp = datetime.datetime.now()
 
@@ -408,7 +499,7 @@ class Moderation(commands.Cog):
             ban_response.set_image(url=attachment.proxy_url)
 
         try:
-            await member.send(embed=ban_message)
+            await member.send(embed=ban_message, view=BanAppealButton(self.bot))
         except Exception:
             ban_log.set_footer(text=f"Could not DM ban message.")
         # Ban AFTER message is sent.
@@ -615,45 +706,6 @@ class Moderation(commands.Cog):
         await self.bot.load_extension(f"cogs.{cog}")
         await interaction.response.send_message(f'`cogs.{cog} reloaded`')
 
-    @tasks.loop(hours=24)
-    async def decay(self):
-
-        """
-        Removed 1 infraction point per week of all members.
-            - Checks daily if decay should be done by comparing current date to next decay date.
-            - Runs a MongoDB command if it ought to decay.
-        """
-
-        current_time = datetime.datetime.now()
-        config = await self.bot.read_user_config(self.bot.application_id)
-
-        decay_embed = discord.Embed(title="")
-
-        if config["decay_day"] <= current_time:
-
-            await self.bot.user_config.update_many({'infraction_points': {'$gt': 0}}, {'$inc': {'infraction_points': -1}})
-            config["decay_day"] = config["decay_day"] + datetime.timedelta(days=7)
-
-            decay_embed.color = green
-            decay_embed.add_field(name=f"Decay Status: True",
-                                  value=f"Next decay at {discord.utils.format_dt(config['decay_day'], style='F')} "
-                                        f"{discord.utils.format_dt(config['decay_day'], style='R')}.")
-
-        else:
-
-            decay_embed.color = red
-            decay_embed.add_field(name=f"Decay Status: False",
-                                  value=f"Next decay at {discord.utils.format_dt(config['decay_day'], style='F')} "
-                                        f"{discord.utils.format_dt(config['decay_day'], style='R')}.")
-
-        await self.bot.update_user_config(self.bot.application_id, config)
-        guild = self.bot.get_guild(self.bot.guild_id)
-        logs = await self.bot.fetch_channel(587731891449364483)
-        await logs.send(embed=decay_embed)
-
-    @decay.before_loop
-    async def decay_before_loop(self):
-        await self.bot.wait_until_ready()
 
 async def setup(bot: commands.Bot) -> None:
-    await bot.add_cog(Moderation(bot), guilds=[discord.Object(id=bot.guild_id)])
+    await bot.add_cog(ModerationCommands(bot), guilds=[discord.Object(id=bot.guild_id)])
