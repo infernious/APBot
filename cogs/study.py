@@ -3,7 +3,7 @@ from discord import app_commands
 from discord.ext import tasks, commands
 import datetime
 
-from cogs.moderation import convert
+from cogs.moderation.commands import convert
 
 blue = 0x00ffff
 

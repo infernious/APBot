@@ -25,11 +25,13 @@ class APBot(commands.Bot):
     async def setup_hook(self) -> None:
         initial_extensions = ['cogs.errorhandler',
                               'cogs.events',
-                              'cogs.moderation',
+                              'cogs.moderation.appeal',
+                              'cogs.moderation.commands',
+                              'cogs.moderation.decay',
                               'cogs.modmail',
                               'cogs.rolereact',
                               'cogs.study',
-                              'cogs.threads'
+                              # 'cogs.threads',
                               ]
         for extension in initial_extensions:
             await self.load_extension(extension)
@@ -72,7 +74,6 @@ class APBot(commands.Bot):
 bot = APBot()
 bot.guild_id = config["guild_id"]
 bot.user_config = db["user_config"]
-
 
 token = os.environ.get("DISCORD_BOT_SECRET")
 bot.run(token)
