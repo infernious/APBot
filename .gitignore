@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 *.swp
 *.out
+*.json
 
 # C extensions
 *.so
