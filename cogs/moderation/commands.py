@@ -115,7 +115,7 @@ class BanAppealButton(discord.ui.View):
         super().__init__(timeout=None)
         self.bot = bot
 
-    @discord.ui.button(label='Appeal Ban', style=discord.ButtonStyle.grey)
+    @discord.ui.button(label='Appeal Ban', style=discord.ButtonStyle.grey, custom_id="appeal")
     async def callback(self, interaction, button):
         """
         Confirm to appeal ban to bring up the modal.
@@ -705,3 +705,4 @@ class ModerationCommands(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(ModerationCommands(bot), guilds=[discord.Object(id=bot.guild_id)])
+    bot.add_view(BanAppealButton(bot))
