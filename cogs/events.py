@@ -53,6 +53,7 @@ class EventConfirm(discord.ui.View):
         button.disabled = True
 
         await interaction.response.edit_message(view=self)
+        await interaction.message.delete()
 
         self.stop()
 
