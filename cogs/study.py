@@ -1,23 +1,21 @@
-import discord
-from discord import app_commands
-from discord.ext import tasks, commands
 import datetime
 
-from cogs.moderation.commands import convert
+import discord
+from discord import app_commands, Interaction, Button, Message
+from discord.ext import commands, tasks
 
-blue = 0x00ffff
+from bot_base import APBot
+from cogs.utils import convert_time
 
 
 class QuestionConfirm(discord.ui.View):
-
-    def __init__(self, bot, message):
+    def __init__(self, bot: APBot, message: Message):
         super().__init__(timeout=None)
         self.bot = bot
         self.message = message
 
-    @discord.ui.button(label='Confirm!', style=discord.ButtonStyle.green)
-    async def callback(self, interaction, button):
-
+    @discord.ui.button(label="Confirm!", style=discord.ButtonStyle.green)
+    async def callback(self, interaction: Interaction, button: Button):
         """
         Confirm mention after command is used as to avoid accidental pings.
         """
@@ -27,16 +25,15 @@ class QuestionConfirm(discord.ui.View):
                 await self.message.reply(f"{role.mention}, a question has been asked!")
 
         button.style = discord.ButtonStyle.green
-        button.emoji = '✅'
+        button.emoji = "✅"
         button.label = "Helpers pinged!"
         button.disabled = True
 
         await interaction.response.edit_message(view=self)
-
         self.stop()
 
-    async def on_timeout(self) -> None:
 
+    async def on_timeout(self) -> None:
         self.callback.style = discord.ButtonStyle.grey
         self.callback.label = "Timed out!"
         self.callback.disabled = True
@@ -45,15 +42,13 @@ class QuestionConfirm(discord.ui.View):
 
 
 class Study(commands.Cog):
-
-    def __init__(self, bot: commands.Bot) -> None:
+    def __init__(self, bot: APBot) -> None:
         self.bot = bot
         self.check_studiers.start()
 
     @app_commands.checks.cooldown(1, 60)
-    @app_commands.command(name='question', description='Ask a question in a subject channel.')
+    @app_commands.command(name="question", description="Ask a question in a subject channel.")
     async def question(self, interaction: discord.Interaction, question: str, attachment: discord.Attachment = None):
-
         """
         Ping helpers in a subject channel after 10 minutes the command is used.
             - Checks if question is in subject channel.
@@ -69,42 +64,47 @@ class Study(commands.Cog):
             raise app_commands.AppCommandError("Please ask a question in the subject channels.")
 
         if len(question.split()) <= 5:
-            raise app_commands.AppCommandError("Please restate your question to have more than 5 words."
-                                               " Don't ask to ask, just post your question! "
-                                               "Be sure to include what you've tried as well.\n \n"
-                                               "Example: /question What is the powerhouse of the cell? \n \n"
-                                               "You can also post an image with your question if need be.")
+            raise app_commands.AppCommandError(
+                "Please restate your question to have more than 5 words."
+                " Don't ask to ask, just post your question! "
+                "Be sure to include what you've tried as well.\n \n"
+                "Example: /question What is the powerhouse of the cell? \n \n"
+                "You can also post an image with your question if need be."
+            )
 
-        question_embed = discord.Embed(title="", color=blue)
+        question_embed = discord.Embed(title="", color=self.bot.colors["blue"])
         question_embed.add_field(name="Question:", value=f"```{question}```")
 
         if attachment:
             question_embed.set_image(url=attachment.proxy_url)
 
-        await interaction.response.send_message(f"{interaction.user.mention} has asked a question! "
-                                                f"You are able to ping helpers after 10 minutes "
-                                                f"*if you have not been helped*.",
-                                                embed=question_embed,
-                                                delete_after=600)
+        await interaction.response.send_message(
+            f"{interaction.user.mention} has asked a question! "
+            f"You are able to ping helpers after 10 minutes "
+            f"*if you have not been helped*.",
+            embed=question_embed,
+            delete_after=600,
+        )
 
         def check(m):
             return m.author.id == self.bot.application_id
 
-        await self.bot.wait_for('message_delete', check=check)
+        await self.bot.wait_for("message_delete", check=check)
 
-        question_embed.add_field(name="Ping Helpers!",
-                                 value="**If help is needed**, you can now ping helpers. Be sure that you have "
-                                       "crafted a **well-developed question** and have shown your **thought "
-                                       "process**. To ping helpers, confirm with the buttom below.",
-                                 inline=False)
+        question_embed.add_field(
+            name="Ping Helpers!",
+            value="**If help is needed**, you can now ping helpers. Be sure that you have "
+            "crafted a **well-developed question** and have shown your **thought "
+            "process**. To ping helpers, confirm with the buttom below.",
+            inline=False,
+        )
 
         ping_helpers = await interaction.channel.send(f"{interaction.user.mention}", embed=question_embed)
         await ping_helpers.edit(view=QuestionConfirm(self.bot, ping_helpers))
 
     @app_commands.checks.cooldown(1, 86400, key=lambda i: i.channel_id)
-    @app_commands.command(name='potd', description='Make a problem-of-the-day for a subject channel.')
+    @app_commands.command(name="potd", description="Make a problem-of-the-day for a subject channel.")
     async def potd(self, interaction: discord.Interaction, title: str, problem: str, attachment: discord.Attachment = None):
-
         """
         Submit a problem-of-the-day in a subject channel.
             - Checks if POTD is in subject channel.
@@ -122,7 +122,7 @@ class Study(commands.Cog):
             topic_split = interaction.channel.topic.split()
             count = int(topic_split[-1]) + 1
             topic_split[-1] = f"{count}"
-            new_topic = ' '.join(topic_split)
+            new_topic = " ".join(topic_split)
         except ValueError:
             count = 1
             new_topic = f"{interaction.channel.topic} | POTD Count: {count}"
@@ -131,15 +131,16 @@ class Study(commands.Cog):
             new_topic = "POTD Count: 1"
         await interaction.channel.edit(topic=new_topic)
 
-        potd_embed = discord.Embed(title=f"", color=blue)
+        potd_embed = discord.Embed(title=f"", color=self.bot.colors["blue"])
         potd_embed.add_field(name=f"POTD #{count}: {title}", value=f"```{problem}```")
         if attachment:
             potd_embed.set_image(url=attachment.proxy_url)
 
         await interaction.response.send_message(embed=potd_embed)
         potd_message = await interaction.original_response()
-        await interaction.channel.create_thread(name=f"POTD #{count}: {title}", message=potd_message,
-                                                reason=f"#{interaction.channel.name} POTD #{count}: {title}")
+        await interaction.channel.create_thread(
+            name=f"POTD #{count}: {title}", message=potd_message, reason=f"#{interaction.channel.name} POTD #{count}: {title}"
+        )
 
         pins = await interaction.channel.pins()
         pins = pins[::1]
@@ -149,9 +150,8 @@ class Study(commands.Cog):
                     await message.unpin()
         await potd_message.pin()
 
-    @app_commands.command(name='study', description='Prevent yourself from viewing unhelpful channels.')
+    @app_commands.command(name="study", description="Prevent yourself from viewing unhelpful channels.")
     async def study(self, interaction: discord.Interaction, duration: str):
-
         """
         Gives member the study role to prevent distraction/procrastination.
             - Checks if time is greater than 10 minutes.
@@ -159,7 +159,7 @@ class Study(commands.Cog):
             - Updates user document in the database collection with datetime to remove the study role.
         """
 
-        seconds = await convert(duration)
+        seconds = await convert_time(duration)
         if seconds <= 600:
             raise app_commands.AppCommandError("Please choose a duration greater than 10 minutes.")
 
@@ -175,14 +175,15 @@ class Study(commands.Cog):
         member_config["study_time_until"] = time_until_dt
         await self.bot.update_user_config(interaction.user.id, member_config)
 
-        await interaction.response.send_message(f"The study role will be removed "
-                                                f"{discord.utils.format_dt(time_until_dt, style='R')} at "
-                                                f"{discord.utils.format_dt(time_until_dt, style='f')}.",
-                                                ephemeral=True)
+        await interaction.response.send_message(
+            f"The study role will be removed "
+            f"{discord.utils.format_dt(time_until_dt, style='R')} at "
+            f"{discord.utils.format_dt(time_until_dt, style='f')}.",
+            ephemeral=True,
+        )
 
     @tasks.loop(minutes=5)
     async def check_studiers(self):
-
         """
         Checks every 5 minutes if any study roles need to be removed.
         """
@@ -205,5 +206,5 @@ class Study(commands.Cog):
         await self.bot.wait_until_ready()
 
 
-async def setup(bot):
+async def setup(bot: APBot):
     await bot.add_cog(Study(bot), guilds=[discord.Object(id=bot.guild_id)])

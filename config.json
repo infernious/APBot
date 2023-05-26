@@ -1,5 +1,15 @@
 {
-  "application_id": 855611673247350805,
-  "guild_id": 892654531547115532,
-  "command_prefix": "ap:"
+    "guild_id": 1106813620207222786,
+    "logs_channel": 587731891449364483,
+    "modmail_channel": 100000000000000,
+    "command_prefix": "ap:",
+    "colors": {
+        "yellow": "0xffff00",
+        "orange": "0xFFA500",
+        "light_orange": "0xFFA07A",
+        "dark_orange": "0xFF5733",
+        "red": "0xFF0000",
+        "green": "0x00FF00",
+        "blue": "0x00FFFF"
+    }
 }
