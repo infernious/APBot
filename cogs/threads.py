@@ -1,23 +1,26 @@
 import asyncio
 
 import discord
-from discord import app_commands
+from discord import (Button, ButtonStyle, Interaction, Role, Thread,
+                     app_commands, utils)
 from discord.ext import commands
+
+from bot_base import APBot
 
 
 class PingHelpers(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="Ping Helpers!", style=discord.ButtonStyle.red)
-    async def callback(self, interaction, button):
+    @discord.ui.button(label="Ping Helpers!", style=ButtonStyle.red)
+    async def callback(self, interaction: Interaction, button: Button):
         """
         Confirm mention after command is used as to avoid accidental pings.
         - Currently uses subject tags to find the helper role
             • Needs to be optimized and, if forums are further split, rewritten.
         """
 
-        button.style = discord.ButtonStyle.green
+        button.style = ButtonStyle.green
         button.emoji = "✅"
         button.label = "Helpers pinged!"
         button.disabled = True
@@ -25,10 +28,10 @@ class PingHelpers(discord.ui.View):
 
         await interaction.response.edit_message(view=self)
 
-        helpers = []
+        helpers: list[Role] = []
         for tag in interaction.channel.applied_tags:
             try:
-                helpers.append(discord.utils.get(interaction.guild.roles, name=f"{tag} Helper"))
+                helpers.append(utils.get(interaction.guild.roles, name=f"{tag} Helper"))
             except:
                 continue
 
@@ -39,8 +42,8 @@ class PingHelpers(discord.ui.View):
         except:
             await interaction.response.send_message(f"Please edit your post to have a subject tag first.", ephemeral=True)
 
-    @discord.ui.button(label="Dismiss", style=discord.ButtonStyle.grey)
-    async def dismiss(self, interaction, button):
+    @discord.ui.button(label="Dismiss", style=ButtonStyle.grey)
+    async def dismiss(self, interaction: Interaction, button):
         """
         Dismiss options to ping helpers.
         """
@@ -53,21 +56,18 @@ class Dismiss(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="Dismiss", style=discord.ButtonStyle.grey)
-    async def dismiss(self, interaction, button):
-        """
-        Dismiss the initial thread message.
-        """
-
+    @discord.ui.button(label="Dismiss", style=ButtonStyle.grey)
+    async def dismiss(self, interaction: Interaction, button):
+        """Dismiss the initial thread message."""
         await interaction.message.delete()
 
 
 class Threads(commands.Cog):
-    def __init__(self, bot: commands.Bot) -> None:
+    def __init__(self, bot: APBot) -> None:
         self.bot = bot
 
     @app_commands.command(name="resolve", description="Mark a forum post as resolved and archive it.")
-    async def resolve(self, interaction: discord.Interaction):
+    async def resolve(self, interaction: Interaction):
         """
         Mark a thread as resolved to archive it.
             - Allows non-authors to resolve a post.
@@ -82,7 +82,7 @@ class Threads(commands.Cog):
         await interaction.channel.edit(archived=True)
 
     @commands.Cog.listener()
-    async def on_thread_create(self, thread):
+    async def on_thread_create(self, thread: Thread):
         """
         - Sends initial message in forum post when created with option to dismiss.
         - After 10 minutes, provides an option to ping helpers.
@@ -99,25 +99,27 @@ class Threads(commands.Cog):
             name="Guidelines",
             inline=False,
             value="""Be sure you are following our rules and guidelines!
-                                                                      - If you haven't already, send your attempts at a solution.
-                                                                      - Also be sure that your title is following the `[Topic] question` format.""",
+                    - If you haven't already, send your attempts at a solution.
+                    - Also be sure that your title is following the `[Topic] question` format.
+            """,
         )
         thread_embed.add_field(
             name="Resolved",
-            inline=False,
             value="Once your question has been answered, please mark your thread as `✅ Resolved`.",
+            inline=False,
         )
         thread_embed.add_field(name="Help", inline=False, value="You will be able to ping helpers after 10 minutes.")
 
         await thread.send(embed=thread_embed, view=Dismiss())
 
         await asyncio.sleep(600)
+
         help_embed = discord.Embed(title="", color=self.bot.colors["blue"])
         help_embed.add_field(name="", inline=False, value="If help is still needed, you may ping helpers now.")
         await thread.starter_message.reply(embed=help_embed, view=PingHelpers())
 
     @commands.Cog.listener()
-    async def on_thread_update(self, before, after):
+    async def on_thread_update(self, before, after: Thread):
         """
         If thread is updated with "Resolved" tag, then thread is archived.
         """
@@ -127,5 +129,5 @@ class Threads(commands.Cog):
             await after.edit(archived=True)
 
 
-async def setup(bot):
+async def setup(bot: APBot):
     await bot.add_cog(Threads(bot), guilds=[discord.Object(id=bot.guild_id)])

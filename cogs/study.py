@@ -1,7 +1,7 @@
 import datetime
 
 import discord
-from discord import app_commands, Interaction, Button, Message
+from discord import Button, Interaction, Message, app_commands
 from discord.ext import commands, tasks
 
 from bot_base import APBot
@@ -32,7 +32,6 @@ class QuestionConfirm(discord.ui.View):
         await interaction.response.edit_message(view=self)
         self.stop()
 
-
     async def on_timeout(self) -> None:
         self.callback.style = discord.ButtonStyle.grey
         self.callback.label = "Timed out!"
@@ -58,18 +57,22 @@ class Study(commands.Cog):
             - Uses QuestionConfirm().
         """
 
-        subject_channels = discord.utils.get(interaction.guild.categories, name="subject channels")
+        subject_channels = await self.bot.getch_channel(interaction.guild, self.bot.config.get("subject_channels_id"))
 
         if interaction.channel.category != subject_channels:
             raise app_commands.AppCommandError("Please ask a question in the subject channels.")
 
         if len(question.split()) <= 5:
             raise app_commands.AppCommandError(
-                "Please restate your question to have more than 5 words."
-                " Don't ask to ask, just post your question! "
-                "Be sure to include what you've tried as well.\n \n"
-                "Example: /question What is the powerhouse of the cell? \n \n"
-                "You can also post an image with your question if need be."
+                """
+                Please restate your question to have more than 5 words.
+                Don't ask to ask, just post your question! 
+                Be sure to include what you've tried as well.
+
+                Example: /question What is the powerhouse of the cell?
+
+                You can also post an image with your question if need be.
+                """.strip()
             )
 
         question_embed = discord.Embed(title="", color=self.bot.colors["blue"])
@@ -79,27 +82,27 @@ class Study(commands.Cog):
             question_embed.set_image(url=attachment.proxy_url)
 
         await interaction.response.send_message(
-            f"{interaction.user.mention} has asked a question! "
-            f"You are able to ping helpers after 10 minutes "
-            f"*if you have not been helped*.",
+            content=f"{interaction.user.mention} has asked a question! If you do not receive help within 10 minutes, you will be able to ping the helpers.",
             embed=question_embed,
             delete_after=600,
         )
 
-        def check(m):
+        def check(m: Message):
             return m.author.id == self.bot.application_id
 
         await self.bot.wait_for("message_delete", check=check)
 
         question_embed.add_field(
             name="Ping Helpers!",
-            value="**If help is needed**, you can now ping helpers. Be sure that you have "
-            "crafted a **well-developed question** and have shown your **thought "
-            "process**. To ping helpers, confirm with the buttom below.",
+            value="""
+            **If help is still required**, you can now ping helpers.
+            Please ensure you **clearly state your question** and show your **thought process**
+            To ping helpers, confirm with the buttom below.
+            """.strip(),
             inline=False,
         )
 
-        ping_helpers = await interaction.channel.send(f"{interaction.user.mention}", embed=question_embed)
+        ping_helpers = await interaction.channel.send(interaction.user.mention, embed=question_embed)
         await ping_helpers.edit(view=QuestionConfirm(self.bot, ping_helpers))
 
     @app_commands.checks.cooldown(1, 86400, key=lambda i: i.channel_id)
@@ -113,7 +116,7 @@ class Study(commands.Cog):
             - Removes all past POTDs if they haven't been removed yet.
         """
 
-        subject_channels = discord.utils.get(interaction.guild.categories, name="subject channels")
+        subject_channels = await self.bot.getch_channel(interaction.guild, self.bot.config.get("subject_channels_id"))
 
         if interaction.channel.category != subject_channels:
             raise app_commands.AppCommandError("Please provide a POTD only in the subject channels.")
@@ -121,7 +124,7 @@ class Study(commands.Cog):
         try:
             topic_split = interaction.channel.topic.split()
             count = int(topic_split[-1]) + 1
-            topic_split[-1] = f"{count}"
+            topic_split[-1] = str(count)
             new_topic = " ".join(topic_split)
         except ValueError:
             count = 1
@@ -133,10 +136,12 @@ class Study(commands.Cog):
 
         potd_embed = discord.Embed(title=f"", color=self.bot.colors["blue"])
         potd_embed.add_field(name=f"POTD #{count}: {title}", value=f"```{problem}```")
+
         if attachment:
             potd_embed.set_image(url=attachment.proxy_url)
 
         await interaction.response.send_message(embed=potd_embed)
+
         potd_message = await interaction.original_response()
         await interaction.channel.create_thread(
             name=f"POTD #{count}: {title}", message=potd_message, reason=f"#{interaction.channel.name} POTD #{count}: {title}"
@@ -160,11 +165,14 @@ class Study(commands.Cog):
         """
 
         seconds = await convert_time(duration)
+        assert seconds is not None
+
         if seconds <= 600:
             raise app_commands.AppCommandError("Please choose a duration greater than 10 minutes.")
 
-        guild = self.bot.get_guild(self.bot.guild_id)
-        study_role = discord.utils.get(guild.roles, name="Study")
+        guild = await self.bot.getch_guild(self.bot.guild_id)
+        study_role = await self.bot.getch_role(guild.id, self.bot.config.get("study_role_id"))
+
         await interaction.user.add_roles(study_role)
 
         # converts duration (string) into seconds (integer)
@@ -176,28 +184,25 @@ class Study(commands.Cog):
         await self.bot.update_user_config(interaction.user.id, member_config)
 
         await interaction.response.send_message(
-            f"The study role will be removed "
-            f"{discord.utils.format_dt(time_until_dt, style='R')} at "
-            f"{discord.utils.format_dt(time_until_dt, style='f')}.",
+            f"The study role will be removed {discord.utils.format_dt(time_until_dt, style='R')}",
             ephemeral=True,
         )
 
-    @tasks.loop(minutes=5)
+    @tasks.loop(minutes=1)
     async def check_studiers(self):
         """
         Checks every 5 minutes if any study roles need to be removed.
         """
 
-        guild = self.bot.get_guild(self.bot.guild_id)
         cursor = self.bot.user_config.find({"study_time_until": {"$lte": datetime.datetime.now()}})
         documents = await cursor.to_list(length=100)
+        study_role = await self.bot.getch_role(self.bot.guild_id, self.bot.config.get("study_role_id"))
 
         for document in documents:
-            member = guild.get_member(document["user_id"])
-            role = discord.utils.get(guild.roles, name="Study")
+            member = await self.bot.getch_member(self.bot.guild_id, document["user_id"])
 
-            if role in member.roles:
-                await member.remove_roles(role)
+            if study_role in member.roles:
+                await member.remove_roles(study_role)
 
             await self.bot.user_config.update_one({"_id": document["_id"]}, {"$unset": {"study_time_until": ""}})
 

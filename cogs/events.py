@@ -1,7 +1,9 @@
-from bot_base import APBot
-from discord import app_commands, Interaction, Button, Object
-from discord.ext import commands
 import discord
+from discord import Button, Interaction, Object, app_commands
+from discord.ext import commands
+
+from bot_base import APBot
+
 
 class EventAnnouncement(discord.ui.View):
     def __init__(self, bot: APBot):
@@ -14,7 +16,7 @@ class EventAnnouncement(discord.ui.View):
         Give the "Lounge: Events" role to the interaction user.
         """
 
-        role = discord.utils.get(interaction.guild.roles, name="Lounge: Events")
+        role = await self.bot.getch_role(interaction.guild.id, self.bot.config.get("events_role_id"))
         member = interaction.guild.get_member(interaction.user.id)
 
         if not member:
@@ -40,10 +42,10 @@ class EventConfirm(discord.ui.View):
         Confirm mention after command is used as to avoid accidental pings.
         """
 
-        event_role = discord.utils.get(interaction.guild.roles, name="Lounge: Events")
-        event_channel = discord.utils.get(interaction.guild.channels, name="events")
+        event_role = await self.bot.getch_role(interaction.guild.id, self.bot.config.get("events_role_id"))
+        event_channel = await self.bot.getch_channel(interaction.guild.id, self.bot.config.get("events_channel_id"))
 
-        await event_channel.send(f"{event_role.mention}", view=EventAnnouncement(self.bot))
+        await event_channel.send(event_role.mention, view=EventAnnouncement(self.bot))
 
         button.style = discord.ButtonStyle.grey
         button.label = "Event announced!"

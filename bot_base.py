@@ -17,12 +17,13 @@ class APBot(commands.Bot):
         self.db = db
         self.user_config = db["user_config"]
         self.guild_id = self.config.get("guild_id")
+
         if not self.guild_id:
             print("No guild ID found in config.json")
             raise SystemExit
 
         default_colors = {
-            "yellow": 0xffff00,
+            "yellow": 0xFFFF00,
             "orange": 0xFFA500,
             "light_orange": 0xFFA07A,
             "dark_orange": 0xFF5733,
@@ -38,7 +39,6 @@ class APBot(commands.Bot):
             intents=discord.Intents.all(),
             activity=discord.Activity(type=discord.ActivityType.playing, name="DM me to contact mods!"),
         )
-
 
     async def setup_hook(self) -> None:
         initial_extensions = [

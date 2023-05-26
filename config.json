@@ -2,6 +2,11 @@
     "guild_id": 1106813620207222786,
     "logs_channel": 587731891449364483,
     "modmail_channel": 100000000000000,
+    "important_updates_id": 100000000000,
+    "events_role_id": 100000000000,
+    "events_channel_id": 10000000,
+    "subject_channels_id": 100000,
+    "study_role_id": 10000000,
     "command_prefix": "ap:",
     "colors": {
         "yellow": "0xffff00",

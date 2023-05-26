@@ -1,0 +1,3 @@
+orjson
+discord.py
+motor

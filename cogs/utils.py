@@ -1,5 +1,6 @@
-from discord.ext import commands
 import re
+
+from discord.ext import commands
 
 time_regex = re.compile("(?:(\d{1,5})(h|s|m|d))+?")
 time_dict = {"s": 1, "m": 60, "h": 60 * 60, "d": 60 * 60 * 60}
@@ -23,4 +24,3 @@ def convert_time(argument):
             raise commands.BadArgument("{} is not a number!".format(v))
 
     return time
-

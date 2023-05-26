@@ -1,9 +1,10 @@
 import datetime
 
 import discord
-from bot_base import APBot
 from discord import Message, Reaction, TextChannel, Thread, User, app_commands
 from discord.ext import commands, tasks
+
+from bot_base import APBot
 
 
 class Modmail(commands.Cog):
@@ -18,6 +19,7 @@ class Modmail(commands.Cog):
         """
         Clears list of people who have DMed the bot in the past 5 minutes to reset the cooldown.
         """
+
         bot_config = await self.bot.read_user_config(self.bot.application_id)
         bot_config["modmail_users"].clear()
         await self.bot.update_user_config(self.bot.application_id, bot_config)
@@ -40,15 +42,13 @@ class Modmail(commands.Cog):
         bot_config = await self.bot.read_user_config(self.bot.application_id)
         if message.author.id in bot_config["modmail_users"]:
             return await message.author.send(
-                f"You have already contacted the mods recently. You are able to send another message "
-                f"{discord.utils.format_dt(self.delay_loop.next_iteration, style='R')}."
+                f"Please wait for {discord.utils.format_dt(self.delay_loop.next_iteration, style='R')} before contacting modmail again."
             )
 
         await message.author.send("Your message has been sent to the mod inbox. We will contact you if needed.")
 
-        modmail_embed = discord.Embed(title="", color=self.bot.colors["blue"])
-        modmail_embed.add_field(name=f"", value=f"{message.content}\n - {message.author.mention}", inline=False)
-        modmail_embed.timestamp = datetime.datetime.now()
+        modmail_embed = discord.Embed(title="", color=self.bot.colors["blue"], timestamp=datetime.datetime.now())
+        modmail_embed.add_field(name="", value=f"{message.content}\n - {message.author.mention}", inline=False)
 
         if message.attachments:
             modmail_embed.set_image(url=message.attachments[0].proxy_url)
@@ -64,7 +64,7 @@ class Modmail(commands.Cog):
         except (KeyError, discord.errors.NotFound, discord.errors.Forbidden):
             modmail: TextChannel = await self.bot.getch_channel(self.bot.config.get("modmail_channel"))
             create_thread: Thread = await modmail.create_thread(
-                name=f"{message.author.name}#{message.author.discriminator}: {message.author.id}", embed=modmail_embed
+                name=f"{message.author}: {message.author.id}", embed=modmail_embed
             )
             thread = create_thread.thread
 
@@ -108,16 +108,14 @@ class Modmail(commands.Cog):
             - Checks if member is in the cooldown list and removes them if so.
         """
 
-        send_embed = discord.Embed(title="", color=self.bot.colors["orange"])
+        send_embed = discord.Embed(title="", color=self.bot.colors["orange"], timestamp=datetime.datetime.now())
         send_embed.add_field(name="Message from the mods!", value=f"{message} \u200b")
-        send_embed.timestamp = datetime.datetime.now()
         if attachment:
             send_embed.set_image(url=attachment.proxy_url)
         await member.send(embed=send_embed)
 
-        response_embed = discord.Embed(title="", color=self.bot.colors["orange"])
-        response_embed.add_field(name=f"Message sent to {member.name}#{member.discriminator}!", value=f"```{message}```")
-        response_embed.timestamp = datetime.datetime.now()
+        response_embed = discord.Embed(title="", color=self.bot.colors["orange"], timestamp=datetime.datetime.now())
+        response_embed.add_field(name=f"Message sent to {member}!", value=f"```\n{message}\n```")
         if attachment:
             response_embed.set_image(url=attachment.proxy_url)
         await interaction.response.send_message(embed=response_embed)
@@ -128,5 +126,5 @@ class Modmail(commands.Cog):
             await self.bot.update_user_config(self.bot.application_id, bot_config)
 
 
-async def setup(bot):
+async def setup(bot: APBot):
     await bot.add_cog(Modmail(bot), guilds=[discord.Object(id=bot.guild_id)])

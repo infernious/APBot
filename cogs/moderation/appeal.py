@@ -1,10 +1,10 @@
 import datetime
 
-
-from discord import Message, Embed, Object, errors, utils
+from discord import Embed, Message, Object, errors, utils
 from discord.ext import commands, tasks
 
 from bot_base import APBot
+
 
 class BanAppeal(commands.Cog):
     def __init__(self, bot: APBot) -> None:
@@ -17,13 +17,14 @@ class BanAppeal(commands.Cog):
         Checks every day for ban appeals.
         """
 
-        guild = self.bot.get_guild(self.bot.guild_id)
-        channel = utils.get(guild.channels, name="important-updates")
+        guild = await self.bot.getch_guild(self.bot.guild_id)
         cursor = self.bot.user_config.find({"check_appeal_date": {"$lte": datetime.datetime.now()}})
         documents = await cursor.to_list(length=100)
 
         for document in documents:
-            appeal_message: Message = await self.bot.getch_message(channel.id, document["appeal_message_id"])
+            appeal_message: Message = await self.bot.getch_message(
+                self.bot.config.get("important_updates_id"), document["appeal_message_id"]
+            )
 
             if not appeal_message or not appeal_message.reactions:
                 continue
