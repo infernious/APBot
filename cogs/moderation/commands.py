@@ -7,6 +7,9 @@ from bot_base import APBot
 from discord import app_commands
 from discord.ext import commands
 
+from bot_base import APBot
+from utils import convert_time
+
 
 class BanAppeal(discord.ui.Modal, title="Ban Appeal"):
     def __init__(self, bot):
@@ -40,9 +43,10 @@ class BanAppeal(discord.ui.Modal, title="Ban Appeal"):
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.send_message(f"Your appeal has been sent!")
 
-        guild = self.bot.get_guild(self.bot.guild_id)
-        appeal_channel = discord.utils.get(guild.channels, name="important-updates")
-        appeal_embed = discord.Embed(title="Ban Appeal", color=self.bot.colors["light_orange"])
+        now = datetime.datetime.now()
+        appeal_channel = self.bot.getch_channel(self.bot.config.get("important_updates_chid"))
+
+        appeal_embed = discord.Embed(title="Ban Appeal", color=self.bot.colors["light_orange"], timestamp=now)
         appeal_embed.add_field(name="User:", value=f"{interaction.user.name}#{interaction.user.discriminator}")
         appeal_embed.add_field(name="ID:", value=f"{interaction.user.id}", inline=False)
         appeal_embed.add_field(name="Appeal:", value=f"```\n{self.appeal.value}\n```", inline=False)
@@ -53,14 +57,13 @@ class BanAppeal(discord.ui.Modal, title="Ban Appeal"):
         if self.miscellaneous.value:
             appeal_embed.add_field(name="Additional Information:", value=f"```\n{self.miscellaneous.value}\n```", inline=False)
 
-        appeal_embed.timestamp = datetime.datetime.now()
         user_config = await self.bot.read_user_config(interaction.user.id)
 
         if "appeal_message_id" in user_config:
             appeal_message = await appeal_channel.fetch_message(user_config["appeal_message_id"])
             appeal_thread = discord.utils.get(
                 appeal_message.channel.threads,
-                name=f"{interaction.user.name}#{interaction.user.discriminator} ({interaction.user.id}) Ban Appeal",
+                name=f"{interaction.user} ({interaction.user.id}) Ban Appeal",
             )
             await appeal_thread.send("Appeal has been updated!", embed=appeal_embed)
         else:
@@ -73,7 +76,7 @@ class BanAppeal(discord.ui.Modal, title="Ban Appeal"):
             )
             user_config["appeal_message_id"] = appeal_message.id
 
-        user_config["check_appeal_date"] = datetime.datetime.now() + datetime.timedelta(days=14)
+        user_config["check_appeal_date"] = now + datetime.timedelta(days=14)
         await self.bot.update_user_config(interaction.user.id, user_config)
 
     async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
@@ -102,7 +105,7 @@ class BanAppealButton(discord.ui.View):
 
 
 class ModerationCommands(commands.Cog):
-    def __init__(self, bot: commands.Bot) -> None:
+    def __init__(self, bot: APBot) -> None:
         self.bot: APBot = bot
 
     @app_commands.checks.has_permissions(moderate_members=True)
@@ -119,11 +122,11 @@ class ModerationCommands(commands.Cog):
 
         await interaction.response.defer()
 
-        warn_message = discord.Embed(title="", color=yellow)
+        warn_message = discord.Embed(title="", color=self.bot.colors["yellow"])
         warn_message.add_field(name="You have been warned!", value=f"Reason: {reason}", inline=False)
         warn_message.timestamp = datetime.datetime.now()
 
-        warn_log = discord.Embed(title=f"{member.name}#{member.discriminator} has been warned.", color=yellow)
+        warn_log = discord.Embed(title=f"{member.name}#{member.discriminator} has been warned.", color=self.bot.colors["yellow"])
         warn_log.add_field(name=f"Reason: ", value=reason, inline=False)
         warn_log.add_field(name=f"User ID: ", value=f"{member.id} ({member.mention})", inline=False)
         warn_log.add_field(
@@ -133,7 +136,7 @@ class ModerationCommands(commands.Cog):
         )
         warn_log.timestamp = datetime.datetime.now()
 
-        warn_response = discord.Embed(title=f"", color=yellow)
+        warn_response = discord.Embed(title=f"", color=self.bot.colors["yellow"])
         warn_response.add_field(name=f"Member warned!", value=f"{member.mention} has been warned.", inline=False)
         warn_response.add_field(name=f"Reason:", value=reason)
         warn_response.timestamp = datetime.datetime.now()
@@ -190,7 +193,7 @@ class ModerationCommands(commands.Cog):
 
         await interaction.response.defer()
 
-        seconds = await convert(duration)
+        seconds = await convert_time(duration)
         time_until = datetime.timedelta(seconds=seconds)
         time_until_dt = datetime.datetime.now() + time_until
         await member.timeout(time_until, reason=reason)
@@ -203,7 +206,7 @@ class ModerationCommands(commands.Cog):
         else:
             member_config["infraction_points"] += 5
 
-        mute_message = discord.Embed(title="", color=orange)
+        mute_message = discord.Embed(title="", color=self.bot.colors["orange"])
         mute_message.add_field(
             name="You have been muted!",
             value=f"""Reason: {reason}
@@ -219,7 +222,7 @@ class ModerationCommands(commands.Cog):
         )
         mute_message.timestamp = datetime.datetime.now()
 
-        mute_log = discord.Embed(title=f"{member.name}#{member.discriminator} has been muted.", color=orange)
+        mute_log = discord.Embed(title=f"{member.name}#{member.discriminator} has been muted.", color=self.bot.colors["orange"])
         mute_log.add_field(name=f"Duration:", value=duration, inline=False)
         mute_log.add_field(name=f"Infraction points:", value=f"`{member_config['infraction_points']}`", inline=False)
         mute_log.add_field(name=f"Reason: ", value=reason, inline=False)
@@ -231,7 +234,7 @@ class ModerationCommands(commands.Cog):
         )
         mute_log.timestamp = datetime.datetime.now()
 
-        mute_response = discord.Embed(title=f"", color=orange)
+        mute_response = discord.Embed(title=f"", color=self.bot.colors["orange"])
         mute_response.add_field(
             name=f"Member muted!",
             value=f"""{member.mention} will be unmuted {discord.utils.format_dt(time_until_dt, style='R')} at {discord.utils.format_dt(time_until_dt, style='t')}.
@@ -273,7 +276,7 @@ class ModerationCommands(commands.Cog):
             update = discord.utils.get(guild.channels, name="important-updates")
             chat_mod = discord.utils.get(guild.roles, name="Chat Moderator")
 
-            ban_warn_embed = discord.Embed(title="", color=red)
+            ban_warn_embed = discord.Embed(title="", color=self.bot.colors["red"])
             ban_warn_embed.add_field(
                 name="Member has reached 30 infraction points!",
                 value=f'{member.mention} has {member_config["infraction_points"]} infraction points and should be reviewed for a ban.',
@@ -302,12 +305,12 @@ class ModerationCommands(commands.Cog):
 
         await interaction.response.defer()
 
-        seconds = await convert(duration)
+        seconds = await convert_time(duration)
         time_until = datetime.timedelta(seconds=seconds)
         time_until_dt = time_until + datetime.datetime.now()
         await member.timeout(time_until, reason=reason)
 
-        mute_message = discord.Embed(title="", color=light_orange)
+        mute_message = discord.Embed(title="", color=self.bot.colors["light_orange"])
         mute_message.add_field(
             name="You have been muted!",
             value=f"""Reason: {reason}
@@ -317,7 +320,7 @@ class ModerationCommands(commands.Cog):
         )
         mute_message.timestamp = datetime.datetime.now()
 
-        mute_log = discord.Embed(title=f"{member.name}#{member.discriminator} has been muted.", color=light_orange)
+        mute_log = discord.Embed(title=f"{member.name}#{member.discriminator} has been muted.", color=self.bot.colors["light_orange"])
         mute_log.add_field(name=f"Duration:", value=duration, inline=False)
         mute_log.add_field(name=f"Reason: ", value=reason, inline=False)
         mute_log.add_field(name=f"User ID:", value=f"{member.id} ({member.mention})", inline=False)
@@ -328,7 +331,7 @@ class ModerationCommands(commands.Cog):
         )
         mute_log.timestamp = datetime.datetime.now()
 
-        mute_response = discord.Embed(title=f"", color=light_orange)
+        mute_response = discord.Embed(title=f"", color=self.bot.colors["light_orange"])
         mute_response.add_field(
             name=f"Member muted!",
             value=f"{member.mention} will be unmuted {discord.utils.format_dt(time_until_dt, style='R')} at {discord.utils.format_dt(time_until_dt, style='t')}.",
@@ -368,11 +371,11 @@ class ModerationCommands(commands.Cog):
 
         await member.timeout(None, reason=reason)
 
-        unmute_message = discord.Embed(title="", color=green)
+        unmute_message = discord.Embed(title="", color=self.bot.colors["green"])
         unmute_message.add_field(name="You have been unmuted!", value=f"Reason: {reason}", inline=False)
         unmute_message.timestamp = datetime.datetime.now()
 
-        unmute_log = discord.Embed(title=f"{member.name}#{member.discriminator} has been unmuted.", color=green)
+        unmute_log = discord.Embed(title=f"{member.name}#{member.discriminator} has been unmuted.", color=self.bot.colors["green"])
         unmute_log.add_field(name=f"Reason: ", value=reason, inline=False)
         unmute_log.add_field(name=f"User ID:", value=f"{member.id} ({member.mention})", inline=False)
         unmute_log.add_field(
@@ -382,7 +385,7 @@ class ModerationCommands(commands.Cog):
         )
         unmute_log.timestamp = datetime.datetime.now()
 
-        unmute_response = discord.Embed(title=f"", color=green)
+        unmute_response = discord.Embed(title=f"", color=self.bot.colors["green"])
         unmute_response.add_field(name=f"Member unmuted!", value=f"{member.mention} has been unmuted.", inline=False)
         unmute_response.add_field(name=f"Reason:", value=reason)
         unmute_response.timestamp = datetime.datetime.now()
@@ -431,11 +434,11 @@ class ModerationCommands(commands.Cog):
 
         await interaction.response.defer()
 
-        kick_message = discord.Embed(title="", color=dark_orange)
+        kick_message = discord.Embed(title="", color=self.bot.colors["dark_orange"])
         kick_message.add_field(name="You have been kicked!", value=f"Reason: {reason}", inline=False)
         kick_message.timestamp = datetime.datetime.now()
 
-        kick_log = discord.Embed(title=f"{member.name}#{member.discriminator} has been kicked.", color=dark_orange)
+        kick_log = discord.Embed(title=f"{member.name}#{member.discriminator} has been kicked.", color=self.bot.colors["dark_orange"])
         kick_log.add_field(name=f"Reason: ", value=reason, inline=False)
         kick_log.add_field(name=f"User ID: ", value=f"{member.id} ({member.mention})", inline=False)
         kick_log.add_field(
@@ -445,7 +448,7 @@ class ModerationCommands(commands.Cog):
         )
         kick_log.timestamp = datetime.datetime.now()
 
-        kick_response = discord.Embed(title=f"", color=dark_orange)
+        kick_response = discord.Embed(title=f"", color=self.bot.colors["dark_orange"])
         kick_response.add_field(name=f"Member kicked!", value=f"{member.mention} has been kicked.", inline=False)
         kick_response.add_field(name=f"Reason:", value=reason)
         kick_response.timestamp = datetime.datetime.now()
@@ -494,11 +497,11 @@ class ModerationCommands(commands.Cog):
 
         await interaction.response.defer()
 
-        ban_message = discord.Embed(title="", color=red)
+        ban_message = discord.Embed(title="", color=self.bot.colors["red"])
         ban_message.add_field(name="You have been banned!", value=f"Reason: {reason}", inline=False)
         ban_message.timestamp = datetime.datetime.now()
 
-        ban_log = discord.Embed(title=f"{member.name}#{member.discriminator} has been banned.", color=red)
+        ban_log = discord.Embed(title=f"{member.name}#{member.discriminator} has been banned.", color=self.bot.colors["red"])
         ban_log.add_field(name=f"Reason: ", value=reason, inline=False)
         ban_log.add_field(name=f"User ID: ", value=f"{member.id} ({member.mention})", inline=False)
         ban_log.add_field(
@@ -508,7 +511,7 @@ class ModerationCommands(commands.Cog):
         )
         ban_log.timestamp = datetime.datetime.now()
 
-        ban_response = discord.Embed(title=f"", color=red)
+        ban_response = discord.Embed(title=f"", color=self.bot.colors["red"])
         ban_response.add_field(name=f"Member banned!", value=f"{member.mention} has been banned.", inline=False)
         ban_response.add_field(name=f"Reason:", value=reason)
         ban_response.timestamp = datetime.datetime.now()
@@ -562,7 +565,7 @@ class ModerationCommands(commands.Cog):
             raise app_commands.AppCommandError("Please enter an integer for `member_id`.")
         await interaction.guild.ban(discord.Object(member_id), reason=reason)
 
-        ban_log = discord.Embed(title=f"{member_id} has been force-banned.", color=red)
+        ban_log = discord.Embed(title=f"{member_id} has been force-banned.", color=self.bot.colors["red"])
         ban_log.add_field(name=f"Reason: ", value=reason, inline=False)
         ban_log.add_field(
             name=f"Responsible Moderator: ",
@@ -571,7 +574,7 @@ class ModerationCommands(commands.Cog):
         )
         ban_log.timestamp = datetime.datetime.now()
 
-        ban_response = discord.Embed(title=f"", color=red)
+        ban_response = discord.Embed(title=f"", color=self.bot.colors["red"])
         ban_response.add_field(name=f"Member force-banned!", value=f"{member_id} has been force-banned.", inline=False)
         ban_response.add_field(name=f"Reason:", value=reason)
         ban_response.timestamp = datetime.datetime.now()
@@ -614,13 +617,13 @@ class ModerationCommands(commands.Cog):
             match infraction["type"]:
                 # /warn
                 case "warn":
-                    infraction_embed = discord.Embed(title="", color=yellow)
+                    infraction_embed = discord.Embed(title="", color=self.bot.colors["yellow"])
                     infraction_embed.add_field(
                         name="Warn", value=f"Reason: {infraction['reason']}\n" f"Responsible Mod: {infraction['moderator']}"
                     )
                 # /wm (NOT /mute)
                 case "mute":
-                    infraction_embed = discord.Embed(title="", color=orange)
+                    infraction_embed = discord.Embed(title="", color=self.bot.colors["orange"])
                     infraction_embed.add_field(
                         name="Mute",
                         value=f"Reason: {infraction['reason']}\n"
@@ -632,23 +635,23 @@ class ModerationCommands(commands.Cog):
                             name="Unmute",
                             value=f"Reason: {infraction['unmute reason']}\n" f"Responsible Mod: {infraction['moderator']}",
                         )
-                        infraction_embed.color = green
+                        infraction_embed.color = self.bot.colors["green"]
                     except KeyError:
                         pass
                 case "kick":
-                    infraction_embed = discord.Embed(title="", color=dark_orange)
+                    infraction_embed = discord.Embed(title="", color=self.bot.colors["dark_orange"])
                     infraction_embed.add_field(
                         name="Warn", value=f"Reason: {infraction['reason']}\n" f"Responsible Mod: {infraction['moderator']}"
                     )
                 # /ban
                 case "ban":
-                    infraction_embed = discord.Embed(title="", color=red)
+                    infraction_embed = discord.Embed(title="", color=self.bot.colors["red"])
                     infraction_embed.add_field(
                         name="Ban", value=f"Reason: {infraction['reason']}\n" f"Responsible Mod: {infraction['moderator']}"
                     )
                 # /forceban
                 case "force-ban":
-                    infraction_embed = discord.Embed(title="", color=red)
+                    infraction_embed = discord.Embed(title="", color=self.bot.colors["red"])
                     infraction_embed.add_field(
                         name="Force-Ban",
                         value=f"Reason: {infraction['reason']}\n" f"Responsible Mod: {infraction['moderator']}",
@@ -690,7 +693,7 @@ class ModerationCommands(commands.Cog):
             update = discord.utils.get(guild.channels, name="important-updates")
             chat_mod = discord.utils.get(guild.roles, name="Chat Moderator")
 
-            ban_warn_embed = discord.Embed(title="", color=red)
+            ban_warn_embed = discord.Embed(title="", color=self.bot.colors["red"])
             ban_warn_embed.add_field(
                 name="Member has reached 30 infraction points!",
                 value=f'{member.mention} has {member_config["infraction_points"]} infraction points'
@@ -742,6 +745,6 @@ class ModerationCommands(commands.Cog):
         await interaction.response.send_message(f"`cogs.{cog} reloaded`")
 
 
-async def setup(bot: commands.Bot) -> None:
+async def setup(bot: APBot) -> None:
     await bot.add_cog(ModerationCommands(bot), guilds=[discord.Object(id=bot.guild_id)])
     bot.add_view(BanAppealButton(bot))

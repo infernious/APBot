@@ -9,17 +9,19 @@ from discord.abc import GuildChannel
 from discord.ext import commands
 
 from config_handler import Config
+from pyloggor import pyloggor
 
 
 class APBot(commands.Bot):
     def __init__(self, db):
-        self.config = Config()
+        self.config = Config("config.json")
         self.db = db
         self.user_config = db["user_config"]
         self.guild_id = self.config.get("guild_id")
+        self.logger = pyloggor(project_root=self.config.get("project_root", "APBot"))
 
         if not self.guild_id:
-            print("No guild ID found in config.json")
+            self.logger.log("CRITICAL", "BOOT", msg="Guild ID not found in config.json, exiting.")
             raise SystemExit
 
         default_colors = {
@@ -32,7 +34,7 @@ class APBot(commands.Bot):
             "blue": 0x00FFFF,
         }
 
-        self.colors = default_colors.update({i: hex(int(j, 16)) for i, j in self.config.get("colors", {})})
+        self.colors = default_colors.update({i: hex(int(j, 16)) for i, j in self.config.get("colors", {}).items()})
 
         super().__init__(
             command_prefix=self.config.get("command_prefix", "ap:"),
@@ -61,11 +63,11 @@ class APBot(commands.Bot):
     async def on_ready(self):
         self.guild = await self.getch_guild(self.guild_id)
         if not self.guild:
-            print("Guild not found")
+            self.logger.log("CRITICAL", "BOOT", msg="Guild not found, exiting.")
             raise SystemExit
 
-        print(f'Logged in as {self.user} at {datetime.fromtimestamp(time.time()).strftime(r"%d-%b-%y, %H:%M:%S")} (GMT)')
-
+        self.logger.log("INFO", "BOOT", msg=f"Logged in as {self.user} at {datetime.fromtimestamp(time.time()).strftime(r'%d-%b-%y, %H:%M:%S')} (GMT)")
+    
     async def read_user_config(self, user_id: int):
         config_from_db = await self.db["user_config"].find_one({"user_id": user_id})
 

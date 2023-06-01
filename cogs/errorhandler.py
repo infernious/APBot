@@ -54,6 +54,7 @@ class ErrorHandler(commands.Cog):
                 name="Error!", value="Something went wrong with the command. Please double check your input and try again."
             )
             error_message.add_field(name="Error Message:", value=formatted_error, inline=False)
+            self.bot.logger.log("WARNING", "Error Handler", msg="Unknown error occurred", error=error)
 
         try:
             await interaction.response.send_message(embed=error_message, ephemeral=True)

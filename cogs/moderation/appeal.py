@@ -23,7 +23,7 @@ class BanAppeal(commands.Cog):
 
         for document in documents:
             appeal_message: Message = await self.bot.getch_message(
-                self.bot.config.get("important_updates_id"), document["appeal_message_id"]
+                self.bot.config.get("important_updates_chid"), document["appeal_message_id"]
             )
 
             if not appeal_message or not appeal_message.reactions:
