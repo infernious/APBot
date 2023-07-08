@@ -7,7 +7,6 @@ from cogs.moderation.commands import convert
 
 blue = 0x00ffff
 
-
 class QuestionConfirm(discord.ui.View):
 
     def __init__(self, bot, message):
@@ -50,6 +49,18 @@ class Study(commands.Cog):
         self.bot = bot
         self.check_studiers.start()
 
+        self.pin_ctx_menu = app_commands.ContextMenu(
+            name="Pin Message",
+            callback=self.pin
+        )
+        self.bot.tree.add_command(self.pin_ctx_menu)
+
+        self.unpin_ctx_menu = app_commands.ContextMenu(
+            name="Unpin Message",
+            callback=self.unpin
+        )
+        self.bot.tree.add_command(self.unpin_ctx_menu)
+
     @app_commands.checks.cooldown(1, 60)
     @app_commands.command(name='question', description='Ask a question in a subject channel.')
     async def question(self, interaction: discord.Interaction, question: str, attachment: discord.Attachment = None):
@@ -63,7 +74,7 @@ class Study(commands.Cog):
             - Uses QuestionConfirm().
         """
 
-        subject_channels = discord.utils.get(interaction.guild.categories, name="subject channels")
+        subject_channels = discord.utils.get(interaction.guild.categories, name="Subject Channels")
 
         if interaction.channel.category != subject_channels:
             raise app_commands.AppCommandError("Please ask a question in the subject channels.")
@@ -113,7 +124,7 @@ class Study(commands.Cog):
             - Removes all past POTDs if they haven't been removed yet.
         """
 
-        subject_channels = discord.utils.get(interaction.guild.categories, name="subject channels")
+        subject_channels = discord.utils.get(interaction.guild.categories, name="Subject Channels")
 
         if interaction.channel.category != subject_channels:
             raise app_commands.AppCommandError("Please provide a POTD only in the subject channels.")
@@ -179,6 +190,30 @@ class Study(commands.Cog):
                                                 f"{discord.utils.format_dt(time_until_dt, style='R')} at "
                                                 f"{discord.utils.format_dt(time_until_dt, style='f')}.",
                                                 ephemeral=True)
+
+    @app_commands.checks.has_role("Honorable")
+    async def pin(self, interaction: discord.Interaction, message: discord.Message):
+
+        """
+        Pins a message using the bot.
+        """
+
+        await message.pin()
+        embed = discord.Embed(color=blue)
+        embed.add_field(name="Pinned! ✔", value="Message successfully pinned.")
+        await interaction.response.send_message(embed=embed)
+
+    @app_commands.checks.has_role("Honorable")
+    async def unpin(self, interaction: discord.Interaction, message: discord.Message):
+
+        """
+        Unpins a message using the bot.
+        """
+
+        await message.unpin()
+        embed = discord.Embed(color=blue)
+        embed.add_field(name="Unpinned! ✔", value="Message successfully unpinned.")
+        await interaction.response.send_message(embed=embed)
 
     @tasks.loop(minutes=5)
     async def check_studiers(self):
