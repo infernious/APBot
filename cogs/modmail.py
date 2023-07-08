@@ -63,7 +63,6 @@ class Modmail(commands.Cog):
                 try:
                     thread = await guild.fetch_channel(user_config["modmail_id"])
                     await thread.send(embed=modmail_embed)
-                    await thread.starter_message.clear_reactions()
                 except (KeyError, discord.errors.NotFound, discord.errors.Forbidden):
                     modmail = discord.utils.get(guild.channels, name="modmail")
                     create_thread = await modmail.create_thread(
@@ -98,14 +97,15 @@ class Modmail(commands.Cog):
     @commands.Cog.listener()
     async def on_reaction_add(self, reaction, user):
         try:
-            if reaction.message.channel.parent.name == "modmail":
-                await reaction.message.channel.edit(archived=True)
+            if reaction.emoji == "✅":
+                if reaction.message.channel.parent.name == "modmail":
+                    await reaction.message.channel.edit(archived=True)
         except AttributeError:
             return
 
     @app_commands.checks.has_permissions(moderate_members=True)
     @app_commands.command(name='send', description='Send messages to other members through modmail.')
-    async def send(self, interaction: discord.Interaction, member: discord.User, *, message: str,
+    async def send(self, interaction: discord.Interaction, message: str, member: discord.User = None,
                    attachment: discord.Attachment = None):
 
         """
@@ -113,6 +113,15 @@ class Modmail(commands.Cog):
             - Generates a response/member embed.
             - Checks if member is in the cooldown list and removes them if so.
         """
+
+        if member is None:
+            try:
+                if interaction.channel.parent.name == "modmail":
+                    member = self.bot.get_user(interaction.channel.name.split()[-1])
+                    if member is None:
+                        member = await self.bot.fetch_user(interaction.channel.name.split()[-1])
+            except AttributeError:
+                raise app_commands.AppCommandError("Please specify a user or use the command in a modmail thread.")
 
         send_embed = discord.Embed(title="", color=orange)
         send_embed.add_field(name="Message from the mods!", value=f"{message} \u200b")
