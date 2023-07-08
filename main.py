@@ -25,6 +25,7 @@ class APBot(commands.Bot):
     async def setup_hook(self) -> None:
         initial_extensions = ['cogs.errorhandler',
                               'cogs.events',
+                              'cogs.meta',
                               'cogs.moderation.appeal',
                               'cogs.moderation.commands',
                               'cogs.moderation.decay',
