@@ -9,13 +9,14 @@ blue = 0x00ffff
 
 class QuestionConfirm(discord.ui.View):
 
-    def __init__(self, bot, message):
+    def __init__(self, bot, message, asker):
         super().__init__(timeout=None)
         self.bot = bot
         self.message = message
+        self.asker = asker
 
     @discord.ui.button(label='Confirm!', style=discord.ButtonStyle.green)
-    async def callback(self, interaction, button):
+    async def callback_confirm(self, interaction, button):
 
         """
         Confirm mention after command is used as to avoid accidental pings.
@@ -34,6 +35,17 @@ class QuestionConfirm(discord.ui.View):
 
         self.stop()
 
+    @discord.ui.button(label='Delete Message', style=discord.ButtonStyle.danger)
+    async def callback_delete(self, interaction, button):
+
+        """
+        Delete the interaction message.
+        """
+
+        await interaction.message.delete()
+        
+        self.stop()
+
     async def on_timeout(self) -> None:
 
         self.callback.style = discord.ButtonStyle.grey
@@ -41,6 +53,15 @@ class QuestionConfirm(discord.ui.View):
         self.callback.disabled = True
 
         await self.message.edit(view=self)
+
+    # Prevent anyone other than the question asker or helpers from using this
+    async def interaction_check(interaction):
+        helpers = [role.id for role in interaction.channel.changed_roles if "Helper" in role.name]
+
+        interaction_creator_id = interaction.user.id
+        interaction_creator_roles = [role.id for roles in interaction.user.roles]
+
+        return (set(interaction_creator_roles) & set(helpers)) or self.asker == interaction_creator_id
 
 
 class Study(commands.Cog):
@@ -110,7 +131,7 @@ class Study(commands.Cog):
                                  inline=False)
 
         ping_helpers = await interaction.channel.send(f"{interaction.user.mention}", embed=question_embed)
-        await ping_helpers.edit(view=QuestionConfirm(self.bot, ping_helpers))
+        await ping_helpers.edit(view=QuestionConfirm(self.bot, ping_helpers, interaction.user.id))
 
     @app_commands.checks.cooldown(1, 86400, key=lambda i: i.channel_id)
     @app_commands.command(name='potd', description='Make a problem-of-the-day for a subject channel.')
