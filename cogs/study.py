@@ -57,11 +57,9 @@ class QuestionConfirm(discord.ui.View):
     # Prevent anyone other than the question asker or helpers from using this
     async def interaction_check(interaction):
         helpers = [role.id for role in interaction.channel.changed_roles if "Helper" in role.name]
-
-        interaction_creator_id = interaction.user.id
         interaction_creator_roles = [role.id for roles in interaction.user.roles]
 
-        return (set(interaction_creator_roles) & set(helpers)) or self.asker == interaction_creator_id
+        return (set(interaction_creator_roles) & set(helpers)) or self.asker == interaction.user.id
 
 
 class Study(commands.Cog):
