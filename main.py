@@ -32,6 +32,7 @@ class APBot(commands.Bot):
                               'cogs.modmail',
                               'cogs.rolereact',
                               'cogs.study',
+                              'cogs.macros',
                               # 'cogs.threads',
                               ]
         for extension in initial_extensions:
@@ -75,6 +76,7 @@ class APBot(commands.Bot):
 bot = APBot()
 bot.guild_id = config["guild_id"]
 bot.user_config = db["user_config"]
+bot.macros = db["macros"]
 
 token = os.environ.get("DISCORD_BOT_SECRET")
 bot.run(token)
