@@ -60,7 +60,7 @@ class Macros(commands.Cog):
 
         maybe_macro = await self.get_macro(macro_name)
         if maybe_macro:
-            await ctx.message.reply(maybe_macro, allowed_mentions=self.allowed_mentions)
+            await ctx.reply(maybe_macro, allowed_mentions=self.allowed_mentions)
         
     
     @commands.check(can_make_macros)
@@ -83,7 +83,7 @@ class Macros(commands.Cog):
             embed = self.failure_embed
             embed.title = "Cannot fetch replied message"
             embed.description = "Cannot fetch replied message - has it been deleted?"
-            await ctx.message.reply(embed=embed)
+            await ctx.reply(embed=embed)
             return
 
         await self.insert_macro(macro_name, reply.content)
@@ -91,7 +91,7 @@ class Macros(commands.Cog):
         embed = self.success_embed
         embed.title = "Success"
         embed.description = f"Macro {self.bot.command_prefix}{self.use_macro.name} {macro_name} is available!"
-        await ctx.message.reply(embed=embed, allowed_mentions=self.allowed_mentions)
+        await ctx.reply(embed=embed, allowed_mentions=self.allowed_mentions)
 
     @commands.check(can_make_macros)
     @commands.command(name='removemacro')
@@ -105,7 +105,7 @@ class Macros(commands.Cog):
         embed = self.failure_embed
         embed.title = "Success"
         embed.description = f"Macro {self.bot.command_prefix}{self.use_macro.name} {macro_name} has been deleted."
-        await ctx.message.reply(embed=embed, allowed_mentions=self.allowed_mentions)
+        await ctx.reply(embed=embed, allowed_mentions=self.allowed_mentions)
 
     @commands.command(name='listmacros')
     async def list_macros(self, ctx: commands.Context):
@@ -117,7 +117,7 @@ class Macros(commands.Cog):
         macros = list(map(lambda macro: macro["name"], macros))
         macros = str(macros)[1:-1] # Remove square brackets
 
-        await ctx.message.reply(embed=discord.Embed(title="Available macros", description=macros))
+        await ctx.reply(embed=discord.Embed(title="Available macros", description=macros))
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Macros(bot), guilds=[discord.Object(id=bot.guild_id)])
