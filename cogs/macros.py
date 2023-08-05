@@ -90,5 +90,17 @@ class Macros(commands.Cog):
         
         ctx.message.reply(f"Macro {self.bot.command_prefix}{self.use_macro.name} {macro_name} has been deleted.", allowed_mentions=self.allowed_mentions)
 
+    @commands.command(name='listmacros')
+    async def list_macros(self, ctx: commands.Context):
+        """
+        Lists all active macros
+        """
+
+        macros = await self.bot.macros.find({"name": {"$exists": True}}).to_list(length=None)
+        macros = list(map(lambda macro: macro["name"], macros))
+        macros = str(macros)[1:-1] # Remove square brackets
+        
+        await ctx.message.reply(content=f"Available macros: {macros}")
+
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Macros(bot), guilds=[discord.Object(id=bot.guild_id)])
