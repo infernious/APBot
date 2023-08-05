@@ -22,8 +22,12 @@ class Macros(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
     
         self.bot = bot
+
         self.allowed_mentions = discord.AllowedMentions.none()
         self.allowed_mentions.replied_user = True
+
+        self.success_embed = discord.Embed(colour=discord.Colour.green())
+        self.failure_embed = discord.Embed(colour=discord.Colour.red())
 
     async def get_macro(self, name: str) -> str | None:
         maybe_found = await self.bot.macros.find_one({"name": name})
@@ -68,16 +72,26 @@ class Macros(commands.Cog):
 
         reply = ctx.message.reference
         if not reply:
-            await ctx.message.reply(content="Cannot make macro: reply to the message to make a macro with this command")
-            return
+            embed = self.failure_embed
+            embed.title = "Cannot make macro"
+            embed.description = "Reply to a message to make a macro with this command"
+            await ctx.message.reply(embed=embed)
+            return 
             
         reply = await ctx.channel.fetch_message(reply.message_id)
         if not reply:
-            await ctx.message.reply(content="Cannot fetch repied message - has it been deleted?")
+            embed = self.failure_embed
+            embed.title = "Cannot fetch replied message"
+            embed.description = "Cannot fetch replied message - has it been deleted?"
+            await ctx.message.reply(embed=embed)
             return
 
         await self.insert_macro(macro_name, reply.content)
-        await ctx.message.reply(content=f"Macro {self.bot.command_prefix}{self.use_macro.name} {macro_name} is available!", allowed_mentions=self.allowed_mentions)
+
+        embed = self.success_embed
+        embed.title = "Success"
+        embed.description = f"Macro {self.bot.command_prefix}{self.use_macro.name} {macro_name} is available!"
+        await ctx.message.reply(embed=embed, allowed_mentions=self.allowed_mentions)
 
     @commands.check(can_make_macros)
     @commands.command(name='removemacro')
@@ -87,8 +101,11 @@ class Macros(commands.Cog):
         """
 
         await self.delete_macro(macro_name)
-        
-        ctx.message.reply(f"Macro {self.bot.command_prefix}{self.use_macro.name} {macro_name} has been deleted.", allowed_mentions=self.allowed_mentions)
+
+        embed = self.failure_embed
+        embed.title = "Success"
+        embed.description = f"Macro {self.bot.command_prefix}{self.use_macro.name} {macro_name} has been deleted."
+        await ctx.message.reply(embed=embed, allowed_mentions=self.allowed_mentions)
 
     @commands.command(name='listmacros')
     async def list_macros(self, ctx: commands.Context):
@@ -99,8 +116,8 @@ class Macros(commands.Cog):
         macros = await self.bot.macros.find({"name": {"$exists": True}}).to_list(length=None)
         macros = list(map(lambda macro: macro["name"], macros))
         macros = str(macros)[1:-1] # Remove square brackets
-        
-        await ctx.message.reply(content=f"Available macros: {macros}")
+
+        await ctx.message.reply(embed=discord.Embed(title="Available macros", description=macros))
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Macros(bot), guilds=[discord.Object(id=bot.guild_id)])
