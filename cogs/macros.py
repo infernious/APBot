@@ -86,12 +86,18 @@ class Macros(commands.Cog):
             await ctx.reply(embed=embed)
             return
 
-        await self.insert_macro(macro_name, reply.content)
+        try:
+            await self.insert_macro(macro_name, reply.content)
 
-        embed = self.success_embed
-        embed.title = "Success"
-        embed.description = f"Macro {self.bot.command_prefix}{self.use_macro.name} {macro_name} is available!"
-        await ctx.reply(embed=embed, allowed_mentions=self.allowed_mentions)
+            embed = self.success_embed
+            embed.title = "Success"
+            embed.description = f"Macro {self.bot.command_prefix}{self.use_macro.name} {macro_name} is available!"
+            await ctx.reply(embed=embed, allowed_mentions=self.allowed_mentions)
+        except KeyError as e:
+            embed = self.failure_embed
+            embed.title = "Failed to create macro"
+            embed.description = f"{e}"
+            await ctx.reply(embed=embed)
 
     @commands.check(can_make_macros)
     @commands.command(name='removemacro')
@@ -100,12 +106,18 @@ class Macros(commands.Cog):
         Removes a macro, preventing it from being used.
         """
 
-        await self.delete_macro(macro_name)
+        try:
+            await self.delete_macro(macro_name)
 
-        embed = self.failure_embed
-        embed.title = "Success"
-        embed.description = f"Macro {self.bot.command_prefix}{self.use_macro.name} {macro_name} has been deleted."
-        await ctx.reply(embed=embed, allowed_mentions=self.allowed_mentions)
+            embed = self.failure_embed
+            embed.title = "Success"
+            embed.description = f"Macro {self.bot.command_prefix}{self.use_macro.name} {macro_name} has been deleted."
+            await ctx.reply(embed=embed, allowed_mentions=self.allowed_mentions)
+        except KeyError as e:
+            embed = self.failure_embed
+            embed.title = "Failed to delete macro"
+            embed.description = f"{e}"
+            await ctx.reply(embed=embed)
 
     @commands.command(name='listmacros')
     async def list_macros(self, ctx: commands.Context):
