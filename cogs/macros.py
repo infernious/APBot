@@ -127,9 +127,8 @@ class Macros(commands.Cog):
 
         macros = await self.bot.macros.find({"name": {"$exists": True}}).to_list(length=None)
         macros = list(map(lambda macro: macro["name"], macros))
-        macros = str(macros)[1:-1] # Remove square brackets
 
-        await ctx.reply(embed=discord.Embed(title="Available macros", description=macros))
+        await ctx.reply(embed=discord.Embed(title="Available macros", description=", ".join(macros)))
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Macros(bot), guilds=[discord.Object(id=bot.guild_id)])
