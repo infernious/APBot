@@ -4,7 +4,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 
-ROLE_CAN_MAKE_MACROS = ["Chat Moderator", "Admin"]
+ROLE_CAN_MAKE_MACROS = ["Chat Moderator", "Admin", "Honorable"]
 
 FAILURE_EMBED = discord.Embed(colour=discord.Colour.red())
 SUCCESS_EMBED = discord.Embed(colour=discord.Colour.green())
