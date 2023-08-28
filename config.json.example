@@ -1,0 +1,25 @@
+{
+  "guild_id": 1106813620207222786,
+  "logs_channel": 587731891449364483,
+  "modmail_channel": 100000000000000,
+  "important_updates_chid": 100000000000,
+  "events_role_id": 100000000000,
+  "events_channel_id": 10000000,
+  "subject_channels_id": 100000,
+  "study_role_id": 10000000,
+  "bot_staff_role_id": 100000,
+  "decay_logs_channel": 100000,
+  "command_prefix": "ap:",
+  "project_root": "APBot",
+  "colors": {
+    "yellow": "0xffff00",
+    "orange": "0xFFA500",
+    "light_orange": "0xFFA07A",
+    "dark_orange": "0xFF5733",
+    "red": "0xFF0000",
+    "green": "0x00FF00",
+    "blue": "0x00FFFF"
+  },
+  "bot_token": "",
+  "mongo_connect_url": ""
+}
