@@ -1,0 +1,5 @@
+orjson
+discord.py
+motor
+pyloggor
+jishaku
