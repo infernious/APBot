@@ -22,14 +22,14 @@ class Decay(commands.Cog):
         # attempt to remove one inf point and get next decay date
         next_decay = await self.bot.db.remove_one_inf()
 
-        if next_decay: # removing one inf point was successful, got next decay date
+        if next_decay:  # removing one inf point was successful, got next decay date
             emb = Embed(
                 title="Decay Success",
                 description=f"Next decay at {format_dt(next_decay, style='F')} {format_dt(next_decay, style='R')}",
                 color=self.bot.colors["green"],
             )
             content = ""
-        else: # failed removing one inf point, send error message instead
+        else:  # failed removing one inf point, send error message instead
             emb = Embed(
                 title="Decay Failure",
                 description="Failed to decay. Please check logs and decay manuallly.",
@@ -39,9 +39,7 @@ class Decay(commands.Cog):
             content = f"<@&{self.bot.config.get('bot_staff_role_id', 0)}>"
 
         # get decay logs channel, or else get logs channel
-        channel = await self.bot.getch_channel(
-            self.bot.config.get("decay_logs_channel", self.bot.config.get("logs_channel"))
-        )
+        channel = await self.bot.getch_channel(self.bot.config.get("decay_logs_channel", self.bot.config.get("logs_channel")))
         await channel.send(embed=emb, content=content)
 
     @decay.before_loop
