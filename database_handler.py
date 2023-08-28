@@ -1,5 +1,6 @@
 import motor.motor_asyncio as motor
 from config_handler import Config
+from datetime import datetime
 
 class Database:
     def __init__(self, conf: Config):
@@ -7,6 +8,18 @@ class Database:
         self.database = self.database_client["ap-students"]
 
         self.conf = conf
+
+    async def get_decay_date(self) -> datetime:
+        # return datetime object
+        ...
+    
+    async def remove_one_inf(self) -> datetime:
+        # return next decay date datetime obj. Return `false` if function failed
+        # I believe it is something like this:
+        # await self.bot.user_config.update_many({'infraction_points': {'$gt': 0}}, {'$inc': {'infraction_points': -1}})
+        #
+        # Also, set decay_date to +7 days.
+        ...
 
     async def read_user_config(self, user_id: int):
         config_from_db = await self.database["user_config"].find_one({"user_id": user_id})
