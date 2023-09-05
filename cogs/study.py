@@ -1,7 +1,6 @@
 import discord
 from discord import app_commands
-from discord.ext import tasks, commands
-import datetime
+from discord.ext import commands
 
 from cogs.moderation.commands import convert
 
@@ -47,7 +46,6 @@ class Study(commands.Cog):
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
-        self.check_studiers.start()
 
         self.pin_ctx_menu = app_commands.ContextMenu(
             name="Pin Message",
@@ -160,37 +158,6 @@ class Study(commands.Cog):
                     await message.unpin()
         await potd_message.pin()
 
-    @app_commands.command(name='study', description='Prevent yourself from viewing unhelpful channels.')
-    async def study(self, interaction: discord.Interaction, duration: str):
-
-        """
-        Gives member the study role to prevent distraction/procrastination.
-            - Checks if time is greater than 10 minutes.
-            - Gives study role to member.
-            - Updates user document in the database collection with datetime to remove the study role.
-        """
-
-        seconds = await convert(duration)
-        if seconds <= 600:
-            raise app_commands.AppCommandError("Please choose a duration greater than 10 minutes.")
-
-        guild = self.bot.get_guild(self.bot.guild_id)
-        study_role = discord.utils.get(guild.roles, name="Study")
-        await interaction.user.add_roles(study_role)
-
-        # converts duration (string) into seconds (integer)
-        time_until = datetime.timedelta(seconds=seconds)
-        time_until_dt = datetime.datetime.now() + time_until
-
-        member_config = await self.bot.read_user_config(interaction.user.id)
-        member_config["study_time_until"] = time_until_dt
-        await self.bot.update_user_config(interaction.user.id, member_config)
-
-        await interaction.response.send_message(f"The study role will be removed "
-                                                f"{discord.utils.format_dt(time_until_dt, style='R')} at "
-                                                f"{discord.utils.format_dt(time_until_dt, style='f')}.",
-                                                ephemeral=True)
-
     @app_commands.checks.has_role("Honorable")
     async def pin(self, interaction: discord.Interaction, message: discord.Message):
 
@@ -214,31 +181,6 @@ class Study(commands.Cog):
         embed = discord.Embed(color=blue)
         embed.add_field(name="Unpinned! ✔", value="Message successfully unpinned.")
         await interaction.response.send_message(embed=embed)
-
-    @tasks.loop(minutes=5)
-    async def check_studiers(self):
-
-        """
-        Checks every 5 minutes if any study roles need to be removed.
-        """
-
-        guild = self.bot.get_guild(self.bot.guild_id)
-        cursor = self.bot.user_config.find({"study_time_until": {"$lte": datetime.datetime.now()}})
-        documents = await cursor.to_list(length=100)
-
-        for document in documents:
-            member = guild.get_member(document["user_id"])
-            role = discord.utils.get(guild.roles, name="Study")
-
-            if role in member.roles:
-                await member.remove_roles(role)
-
-            await self.bot.user_config.update_one({"_id": document["_id"]}, {"$unset": {"study_time_until": ""}})
-
-    @check_studiers.before_loop
-    async def check_studiers_before_loop(self):
-        await self.bot.wait_until_ready()
-
 
 async def setup(bot):
     await bot.add_cog(Study(bot), guilds=[discord.Object(id=bot.guild_id)])

@@ -55,6 +55,8 @@ class APBot(commands.Bot):
             "cogs.modmail",
             "cogs.rolereact",
             "cogs.study",
+            "cogs.focus",
+            "cogs.bonk"
             "jishaku"
             # 'cogs.threads',
         ]

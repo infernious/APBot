@@ -9,6 +9,65 @@ class Database:
 
         self.conf = conf
 
+    async def set_user_study_expiry(self, user_id, study_expires_at):
+        # add a user to the database with study expires_at epoch timestamp
+        ...
+
+    async def get_user_study_expiry(self, user_id) -> int:
+        # return the epoch timestamp when the user's study role should be removed at
+        ...
+
+    async def get_all_study_students(self) -> dict[int, int]:
+        # return a dict of users with study role like so:
+        # {
+        #     "USER_ID: int": "STUDY_EXPIRES_AT: int",
+        #     "USER_ID: int": "STUDY_EXPIRES_AT: int",
+        #     "USER_ID: int": "STUDY_EXPIRES_AT: int"
+        # }
+        ...
+
+    async def set_reminder(self, user_id: int, expires_at: int, message: str):
+        # Add a reminder
+        ...
+
+    async def remove_bonk(self, user_id: int, expires_at: int, message: str):
+        # Remove reminder for user_id which has given params
+        ...
+
+    async def remove_all_bonks(self, user_id: int):
+        # remove all bonks for user with user_id
+        ...
+
+    async def get_all_user_reminders(self, user_id: int):
+        # return a list of reminders like soo:
+        # [
+        #     [
+        #         "EXPIRES_AT: int",
+        #         "MESSAGE: str"
+        #     ],
+        #     [
+        #         "EXPIRES_AT: int",
+        #         "MESSAGE: str"
+        #     ]
+        # ]
+        ...
+
+    async def get_all_reminders(self):
+        # Return all reminders known to the bot in this format:
+        # [
+        #         [
+        #             "USER_ID: INT",
+        #             "EXPIRES_AT: int",
+        #             "MESSAGE: str"
+        #         ],
+        #         [
+        #             "USER_ID: INT",
+        #             "EXPIRES_AT: int",
+        #             "MESSAGE: str"
+        #         ]
+        # ]
+        ...
+
     async def get_decay_date(self) -> datetime:
         # return datetime object
         ...
