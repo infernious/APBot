@@ -1,10 +1,5 @@
-import discord
-from discord import app_commands
-from discord.ext import commands
 
-
-blue = 0x00ffff
-
+from nextcord.ext import commands
 
 class EventAnnouncement(discord.ui.View):
 

@@ -1,21 +1,17 @@
-import discord
-from discord import app_commands
-from discord.ext import commands
+from nextcord.ext import commands
+from nextcord import slash_command, Interaction, Button, ButtonStyle, Attachment, Embed, Message, Object
+import nextcord
+from bot_base import APBot
+import re
 
-from cogs.moderation.commands import convert
-
-blue = 0x00ffff
-
-class QuestionConfirm(discord.ui.View):
-
-    def __init__(self, bot, message):
+class QuestionConfirm(nextcord.ui.View):
+    def __init__(self, bot: APBot, message):
         super().__init__(timeout=None)
         self.bot = bot
         self.message = message
 
-    @discord.ui.button(label='Confirm!', style=discord.ButtonStyle.green)
-    async def callback(self, interaction, button):
-
+    @nextcord.ui.button(label='Confirm!', style=ButtonStyle.green)
+    async def callback(self, interaction: Interaction, button: Button):
         """
         Confirm mention after command is used as to avoid accidental pings.
         """
@@ -24,18 +20,16 @@ class QuestionConfirm(discord.ui.View):
             if "Helper" in role.name:
                 await self.message.reply(f"{role.mention}, a question has been asked!")
 
-        button.style = discord.ButtonStyle.green
+        button.style = ButtonStyle.green
         button.emoji = '✅'
         button.label = "Helpers pinged!"
         button.disabled = True
 
         await interaction.response.edit_message(view=self)
-
         self.stop()
 
     async def on_timeout(self) -> None:
-
-        self.callback.style = discord.ButtonStyle.grey
+        self.callback.style = ButtonStyle.grey
         self.callback.label = "Timed out!"
         self.callback.disabled = True
 
@@ -43,26 +37,13 @@ class QuestionConfirm(discord.ui.View):
 
 
 class Study(commands.Cog):
-
-    def __init__(self, bot: commands.Bot) -> None:
+    def __init__(self, bot: APBot) -> None:
         self.bot = bot
+        self.potd_count_re = re.compile(r"POTD Count: [0-9]{1,3}")
 
-        self.pin_ctx_menu = app_commands.ContextMenu(
-            name="Pin Message",
-            callback=self.pin
-        )
-        self.bot.tree.add_command(self.pin_ctx_menu)
-
-        self.unpin_ctx_menu = app_commands.ContextMenu(
-            name="Unpin Message",
-            callback=self.unpin
-        )
-        self.bot.tree.add_command(self.unpin_ctx_menu)
-
-    @app_commands.checks.cooldown(1, 60)
-    @app_commands.command(name='question', description='Ask a question in a subject channel.')
-    async def question(self, interaction: discord.Interaction, question: str, attachment: discord.Attachment = None):
-
+    @slash_command(name="question", description="Ask a question in a subject channel.")
+    @commands.cooldown(1, 60)
+    async def question(self, interaction: Interaction, question: str, attachment: Attachment = None):
         """
         Ping helpers in a subject channel after 10 minutes the command is used.
             - Checks if question is in subject channel.
@@ -72,48 +53,55 @@ class Study(commands.Cog):
             - Uses QuestionConfirm().
         """
 
-        subject_channels = discord.utils.get(interaction.guild.categories, name="Subject Channels")
-
-        if interaction.channel.category != subject_channels:
-            raise app_commands.AppCommandError("Please ask a question in the subject channels.")
+        if interaction.channel.category != self.bot.config.get("subject_category_id"):
+            raise commands.AppCommandError("Please ask a question in the subject channels.")
 
         if len(question.split()) <= 5:
-            raise app_commands.AppCommandError("Please restate your question to have more than 5 words."
-                                               " Don't ask to ask, just post your question! "
-                                               "Be sure to include what you've tried as well.\n \n"
-                                               "Example: /question What is the powerhouse of the cell? \n \n"
-                                               "You can also post an image with your question if need be.")
+            return interaction.response.send_message("""
+                Please restate your question to have more than 5 words.
+                Don't ask to ask, just post your question! 
+                Be sure to include what you've tried as well.
 
-        question_embed = discord.Embed(title="", color=blue)
+                Example: /question What is the powerhouse of the cell?
+
+                You can also post an image with your question if need be.
+                """.strip(),
+                ephemeral=True
+            )
+
+        question_embed = Embed(title="", color=self.bot.colors["blue"])
         question_embed.add_field(name="Question:", value=f"```{question}```")
 
         if attachment:
             question_embed.set_image(url=attachment.proxy_url)
 
-        await interaction.response.send_message(f"{interaction.user.mention} has asked a question! "
-                                                f"You are able to ping helpers after 10 minutes "
-                                                f"*if you have not been helped*.",
-                                                embed=question_embed,
-                                                delete_after=600)
+        await interaction.response.send_message(
+            content=f"{interaction.user.mention} has asked a question! If you do not receive help within 10 minutes, you will be able to ping the helpers.",
+            embed=question_embed,
+            delete_after=600,
+        )
 
-        def check(m):
+        def check(m: Message):
             return m.author.id == self.bot.application_id
 
-        await self.bot.wait_for('message_delete', check=check)
+        await self.bot.wait_for("message_delete", check=check)
 
-        question_embed.add_field(name="Ping Helpers!",
-                                 value="**If help is needed**, you can now ping helpers. Be sure that you have "
-                                       "crafted a **well-developed question** and have shown your **thought "
-                                       "process**. To ping helpers, confirm with the buttom below.",
-                                 inline=False)
+        question_embed.add_field(
+            name="Ping Helpers!",
+            value="""
+            **If help is still required**, you can now ping helpers.
+            Please ensure you **clearly state your question** and show your **thought process**
+            To ping helpers, confirm with the buttom below.
+            """.strip(),
+            inline=False,
+        )
 
-        ping_helpers = await interaction.channel.send(f"{interaction.user.mention}", embed=question_embed)
+        ping_helpers = await interaction.channel.send(interaction.user.mention, embed=question_embed)
         await ping_helpers.edit(view=QuestionConfirm(self.bot, ping_helpers))
 
-    @app_commands.checks.cooldown(1, 86400, key=lambda i: i.channel_id)
-    @app_commands.command(name='potd', description='Make a problem-of-the-day for a subject channel.')
-    async def potd(self, interaction: discord.Interaction, title: str, problem: str, attachment: discord.Attachment = None):
-
+    @slash_command(name="potd", description="Make a problem-of-the-day for a subject channel.")
+    @commands.cooldown(1, 86400, commands.BucketType.channel)
+    async def potd(self, interaction: Interaction, title: str, problem: str, attachment: Attachment = None):
         """
         Submit a problem-of-the-day in a subject channel.
             - Checks if POTD is in subject channel.
@@ -122,65 +110,36 @@ class Study(commands.Cog):
             - Removes all past POTDs if they haven't been removed yet.
         """
 
-        subject_channels = discord.utils.get(interaction.guild.categories, name="Subject Channels")
+        if interaction.channel.category != self.bot.config.get("subject_category_id"):
+            raise commands.AppCommandError("Please provide a POTD only in the subject channels.")
 
-        if interaction.channel.category != subject_channels:
-            raise app_commands.AppCommandError("Please provide a POTD only in the subject channels.")
+        potd_count = self.potd_count_re.findall(interaction.channel.topic)
+        if potd_count:
+            potd_count = int(potd_count[0].split(" ")[-1]) + 1
+            new_channel_topic = interaction.channel.topic.replace(f"POTD Count: {potd_count-1}", f"POTD Count: {potd_count}")
+        else:
+            potd_count = 1
+            new_channel_topic = interaction.channel.topic + f" | POTD Count: 1"
 
-        try:
-            topic_split = interaction.channel.topic.split()
-            count = int(topic_split[-1]) + 1
-            topic_split[-1] = f"{count}"
-            new_topic = ' '.join(topic_split)
-        except ValueError:
-            count = 1
-            new_topic = f"{interaction.channel.topic} | POTD Count: {count}"
-        except AttributeError:
-            count = 1
-            new_topic = "POTD Count: 1"
-        await interaction.channel.edit(topic=new_topic)
+        await interaction.channel.edit(topic=new_channel_topic)
 
-        potd_embed = discord.Embed(title=f"", color=blue)
-        potd_embed.add_field(name=f"POTD #{count}: {title}", value=f"```{problem}```")
+        thread_topic = f"POTD #{potd_count}: {title}"
+
+        potd_embed = Embed(title=title, description=f"```{problem}```", color=self.bot.colors.get("blue"))
         if attachment:
             potd_embed.set_image(url=attachment.proxy_url)
 
-        await interaction.response.send_message(embed=potd_embed)
-        potd_message = await interaction.original_response()
-        await interaction.channel.create_thread(name=f"POTD #{count}: {title}", message=potd_message,
-                                                reason=f"#{interaction.channel.name} POTD #{count}: {title}")
+        potd_message = await interaction.channel.send(content=thread_topic, embed=potd_embed)
+        await potd_message.create_thread(name=thread_topic)
 
         pins = await interaction.channel.pins()
-        pins = pins[::1]
         for message in pins:
-            if message.embeds:
-                if "POTD" in message.embeds[0].fields[0].name.split():
-                    await message.unpin()
+            if not message.embeds or "POTD" not in message.embeds[0].fields[0].name.split():
+                continue
+
+            await message.unpin()
+
         await potd_message.pin()
 
-    @app_commands.checks.has_role("Honorable")
-    async def pin(self, interaction: discord.Interaction, message: discord.Message):
-
-        """
-        Pins a message using the bot.
-        """
-
-        await message.pin()
-        embed = discord.Embed(color=blue)
-        embed.add_field(name="Pinned! ✔", value="Message successfully pinned.")
-        await interaction.response.send_message(embed=embed)
-
-    @app_commands.checks.has_role("Honorable")
-    async def unpin(self, interaction: discord.Interaction, message: discord.Message):
-
-        """
-        Unpins a message using the bot.
-        """
-
-        await message.unpin()
-        embed = discord.Embed(color=blue)
-        embed.add_field(name="Unpinned! ✔", value="Message successfully unpinned.")
-        await interaction.response.send_message(embed=embed)
-
-async def setup(bot):
-    await bot.add_cog(Study(bot), guilds=[discord.Object(id=bot.guild_id)])
+async def setup(bot: APBot):
+    await bot.add_cog(Study(bot), guilds=[Object(id=bot.guild_id)])

@@ -2,9 +2,8 @@ import asyncio
 import datetime
 
 from bot_base import APBot
-from discord import Embed, Object
-from discord.ext import commands, tasks
-from discord.utils import format_dt
+from nextcord import Embed, Object
+from nextcord.ext import commands, tasks
 
 
 class Decay(commands.Cog):
@@ -15,7 +14,7 @@ class Decay(commands.Cog):
     @tasks.loop(hours=24 * 7)
     async def decay(self):
         """
-        Removed 1 infraction point per week of all members.
+        Removes 1 infraction point per week of all members.
             - Runs a MongoDB command if it ought to decay.
         """
 
@@ -25,7 +24,7 @@ class Decay(commands.Cog):
         if next_decay:  # removing one inf point was successful, got next decay date
             emb = Embed(
                 title="Decay Success",
-                description=f"Next decay at {format_dt(next_decay, style='F')} {format_dt(next_decay, style='R')}",
+                description=f"Next decay at <t:{next_decay.timestamp()}:F> <t:{next_decay.timestamp()}:R>",
                 color=self.bot.colors["green"],
             )
             content = ""

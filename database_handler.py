@@ -80,6 +80,21 @@ class Database:
         # Also, set decay_date to +7 days.
         ...
 
+    async def get_appeals(self) -> list[dict[str, str]]:
+        # Return all appeal messages that should be processed, like so:
+        # {
+        #     "USER_ID: int": "MESSAGE_ID: int",
+        #     "USER_ID: int": "MESSAGE_ID: int",
+        #     "USER_ID: int": "MESSAGE_ID: int"
+        # }
+        ...
+    
+    async def remove_pending_appeal(self, user_id):
+        ...
+
+    async def get_user_infractions(self, user_id):
+        ...
+
     async def read_user_config(self, user_id: int):
         config_from_db = await self.database["user_config"].find_one({"user_id": user_id})
 

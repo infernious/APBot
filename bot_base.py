@@ -12,6 +12,7 @@ from config_handler import Config
 from database_handler import Database
 from pyloggor import pyloggor
 
+from nextcord import Color
 
 class APBot(commands.Bot):
     def __init__(self):

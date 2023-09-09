@@ -1,65 +1,57 @@
-import discord
-from discord.ext import tasks, commands
+from nextcord import Embed, Message, Object, errors
+from nextcord.ext import commands, tasks
+from typing import Optional
 
-import datetime
-
-yellow = 0xffff00
-orange = 0xffa500
-light_orange = 0xffa07a
-dark_orange = 0xff5733
-red = 0xff0000
-green = 0x00ff00
+from bot_base import APBot
 
 
 class BanAppeal(commands.Cog):
-
-    def __init__(self, bot: commands.Bot) -> None:
+    def __init__(self, bot: APBot) -> None:
         self.bot = bot
         self.appeal_loop.start()
 
     @tasks.loop(hours=24)
     async def appeal_loop(self):
-
         """
         Checks every day for ban appeals.
         """
+        appeals = await self.bot.db.get_appeals()
+        for user_id, message_id in appeals.items():
+            appeal_message: Optional[Message] = await self.bot.getch_message(self.bot.config.get("appeals_channel_id"), message_id)
+            if not appeal_message or not appeal_message.reactions:
+                continue
 
-        guild = self.bot.get_guild(self.bot.guild_id)
-        channel = discord.utils.get(guild.channels, name="important-updates")
-        cursor = self.bot.user_config.find({"check_appeal_date": {"$lte": datetime.datetime.now()}})
-        documents = await cursor.to_list(length=100)
+            maintain_ban_reactions = len([i for i in appeal_message.reactions if i.emoji == "🔴"])
+            unban_reactions = len([i for i in appeal_message.reactions if i.emoji == "🟢"])
 
-        for document in documents:
+            decision_embed = Embed(title="")
 
-            appeal_message = await channel.fetch_message(document["appeal_message_id"])
-
-            maintain_ban_reaction = discord.utils.get(appeal_message.reactions, emoji="🔴")
-            unban_reaction = discord.utils.get(appeal_message.reactions, emoji="🟢")
-
-            thread = discord.utils.find(lambda c: f"({document['user_id']})" in c.name, appeal_message.channel.threads)
-            decision_embed = discord.Embed(title='')
-
-            if unban_reaction.count > maintain_ban_reaction.count:
+            if unban_reactions > maintain_ban_reactions:
                 try:
-                    decision_embed.colour = green
+                    decision_embed.colour = self.bot.colors["green"]
                     decision_embed.add_field(name="", value="Member will be unbanned!")
-                    await thread.send(embed=decision_embed)
-                    await guild.unban(discord.Object(id=document["user_id"]))
-                except discord.errors.NotFound:
-                    decision_embed.colour = orange
+                    await self.bot.guild.unban(Object(id=user_id))
+                except errors.NotFound:
+                    decision_embed.colour = self.bot.colors["orange"]
                     decision_embed.add_field(name="", value="Member is already unbanned!")
+                try:
+                    user = await self.bot.getch_user(user_id)
+                    await user.send(embed=Embed(title="Ban Lifted.", description="You have been unbanned from AP Students! Welcome back :)\nJoin back using [this](https://discord.gg/apstudents) link!", color=self.bot.colors["green"]))
+                except:
+                    pass
             else:
-                decision_embed.colour = red
+                decision_embed.colour = self.bot.colors["red"]
                 decision_embed.add_field(name="", value="Member will remain banned!")
 
-            await thread.edit(archived=True)
-            await self.bot.user_config.update_one({"_id": document["_id"]}, {"$unset": {"check_appeal_date": ""}})
-            await self.bot.user_config.update_one({"_id": document["_id"]}, {"$unset": {"appeal_message_id": ""}})
+            await appeal_message.thread.send(embed=decision_embed)
+            await appeal_message.thread.edit(archived=True)
+
+            await self.bot.db.remove_pending_appeal(user_id)
 
     @appeal_loop.before_loop
     async def appeal_before_loop(self):
         await self.bot.wait_until_ready()
 
 
-async def setup(bot: commands.Bot) -> None:
-    await bot.add_cog(BanAppeal(bot), guilds=[discord.Object(id=bot.guild_id)])
+async def setup(bot: APBot) -> None:
+    await bot.add_cog(BanAppeal(bot), guilds=[Object(id=bot.guild_id)])
