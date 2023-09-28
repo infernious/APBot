@@ -1,10 +1,13 @@
 import asyncio
 import time
+from datetime import datetime as dt
+from typing import List, Union
+from uuid import uuid4
+
+from nextcord import Embed, Interaction, SlashOption, slash_command
+from nextcord.ext import commands
 
 from bot_base import APBot
-from discord import Embed, Interaction, Object, app_commands
-from discord.ext import commands
-
 from cogs.utils import convert_time
 
 
@@ -12,89 +15,131 @@ class Bonk(commands.Cog):
     def __init__(self, bot: APBot) -> None:
         self.bot = bot
 
-    async def remind(self, bonk_details) -> None:
-        user_id, end_time, message = bonk_details
-
-        await self.bot.db.remove_bonk(user_id, end_time, message)
+    async def remind(self, reminder_id: str, user_id: int, start_time: int, message: str) -> None:
+        await self.bot.db.remove_reminder(user_id, reminder_id)
         user = await self.bot.getch_user(user_id)
 
         if not user:
             return
 
-        await user.send(f"Reminder! Set on: <t:{end_time}:F>\n{message}")
+        await user.send(f"Reminder! Set on <t:{start_time}:F> (<t:{start_time}:R>)\n{message or ''}")
 
-    @app_commands.command(name="bonk", description="Set a reminder!")
-    async def _bonk(self, interaction: Interaction, duration: str, *, message: str = None) -> None:
-        duration = convert_time(duration)
+    @slash_command(name="bonk", description="Bonks Stuff")
+    async def _bonk(self, inter: Interaction):
+        ...
+
+    @_bonk.subcommand(name="set", description="Set a reminder!")
+    async def _bonk_set(
+        self,
+        inter: Interaction,
+        duration: str = SlashOption("duration", description="Reminder duration. Format: 5h9m2s", required=True),
+        message: str = SlashOption("message", description="Reminder message.", required=False, default=""),
+    ) -> None:
+        if len(await self.bot.db.get_all_user_reminders(inter.user.id)) >= 25:
+            return await inter.send("You can't have more than 25 reminders at once!")
+        duration: Union[str, int] = convert_time(duration)
+        if isinstance(duration, str):
+            return await inter.send(duration, ephemeral=True)
 
         if duration > 60 * 60 * 24 * 7 * 52 * 4:
-            raise app_commands.CheckFailure("You can't set a reminder for more than 4 years.")
+            return await inter.send("You can't set a reminder for more than 4 years!", ephemeral=True)
 
-        end_time = time.time() + duration
-        await self.bot.db.set_reminder(interaction.user.id, end_time, message)
+        start_time = int(time.time())
+        end_time = start_time + duration
+        reminder_id = uuid4().hex
+        await self.bot.db.set_reminder(reminder_id, inter.user.id, start_time, end_time, message)
 
         self.bot.loop.call_later(
             duration,
             asyncio.create_task,
-            self.remind(interaction.user.id, message),
+            self.remind(reminder_id, inter.user.id, start_time, message),
         )
 
         m = f"about `{message}` " if message else ""
-        await interaction.response.send_message(f"I'll remind you {m}on <t:{int(end_time)}:F>", ephemeral=True)
+        await inter.response.send_message(f"I'll remind you {m}on <t:{int(end_time)}:F>", ephemeral=True)
 
-    @app_commands.command(name="bonks", description="List all your reminders")
-    async def _bonks(self, interaction: Interaction) -> None:
-        user_reminders = await self.bot.db.get_all_reminders(interaction.user.id)
+    @_bonk.subcommand(name="list", description="List all your reminders")
+    async def _bonk_list(self, inter: Interaction) -> None:
+        user_reminders = (await self.bot.db.get_all_user_reminders(inter.user.id)).values()
         if len(user_reminders) == 0:
-            return await interaction.response.send_message("You have no set reminders!", ephemeral=True)
+            return await inter.response.send_message("You have no set reminders!", ephemeral=True)
 
-        user_reminders = sorted(user_reminders, key=lambda x: x[0])
+        formatted_reminders: List[str] = []
+        for ind, reminder in enumerate(user_reminders):
+            prefix = f"{ind}. "
+            time_str = f"Reminder <t:{int(reminder['end'])}:R>" + " - "
+            reminder_message = reminder["message"] or ""
+            avail_chars = 50 - len(prefix) - len(time_str)
+            if len(reminder_message) > avail_chars:
+                message = reminder_message[avail_chars - 3] + "..."
+            else:
+                message = reminder_message or "No Message"
+            formatted_reminders.append(prefix + time_str + message)
 
-        await interaction.response.send_message(
+        await inter.response.send_message(
             embed=Embed(
                 title="Your Reminders",
-                description="\n".join(
-                    [
-                        f"`{i+1}.` Set on: <t:{user_reminders[i][0]}:F> {user_reminders[i][1][:((2000 - ((31 * len(user_reminders)) - 2)) / len(user_reminders))-4]}..."
-                        for i in range(len(user_reminders))
-                    ]
-                ),
+                description="\n".join(formatted_reminders),
             ),
             ephemeral=True,
         )
 
-    @app_commands.command(name="bonkremove", description="Remove a specific reminder!")
-    async def _remove_reminder(self, interaction: Interaction, index: int):
-        user_reminders = await self.bot.db.get_all_user_reminders(interaction.user.id)
+    @_bonk.subcommand(name="remove", description="Remove a specific reminder!")
+    async def _bonk_remove(
+        self,
+        inter: Interaction,
+        reminder_id: str = SlashOption(
+            name="reminder",
+            description="Which reminder to remove.",
+        ),
+    ):
+        user_reminders = await self.bot.db.get_all_user_reminders(inter.user.id)
         if len(user_reminders) == 0:
-            return await interaction.response.send_message("You have no set reminders!", ephemeral=True)
+            return await inter.response.send_message("You have no set reminders!", ephemeral=True)
 
-        user_reminders = sorted(user_reminders, key=lambda x: x[0])
+        await self.bot.db.remove_reminder(inter.user.id, reminder_id)
+        await inter.response.send_message("Removed reminder.", ephemeral=True)
 
-        if index > len(user_reminders):
-            return await interaction.response.send_message(
-                "You don't have that many reminders! Use `/bonks` to get a list of all your reminders!"
-            )
+    @_bonk_remove.on_autocomplete("reminder_id")
+    async def _bonk_remve_autocomplete(self, inter: Interaction, reminder_id: str):
+        formatted_choices = {}
+        user_reminders = await self.bot.db.get_all_user_reminders(inter.user.id)
+        for ind, (reminder_id, reminder_details) in enumerate(user_reminders.items()):
+            prefix: str = f"{ind+1}. "
+            time_str: str = "Reminder at " + dt.fromtimestamp(reminder_details["end"]).strftime("%m %b %Y %H:%M:%S") + " - "
+            reminder_message = reminder_details["message"] or ""
+            avail_chars = 100 - len(prefix) - len(time_str)
+            if len(reminder_message) > avail_chars:
+                message: str = reminder_message[: avail_chars - 3] + "..."
+            else:
+                message: str = reminder_message or "No Message"
+            formatted_choices[prefix + time_str + message] = reminder_id
+        await inter.response.send_autocomplete(formatted_choices)
 
-        await self.bot.db.remove_bonk(interaction.user.id, user_reminders[index - 1][0], user_reminders[index - 1][1])
-        await interaction.response.send_message("Removed reminder.", ephemeral=True)
-
-    @app_commands.command(name="bonkpurge", description="Remove all reminders")
-    async def _remove_all_reminders(self, interaction: Interaction):
-        await self.bot.db.remove_all_bonks(interaction.user.id)
-        await interaction.response.send_message("Removed all reminders!", ephemeral=True)
+    @_bonk.subcommand(name="purge", description="Remove all reminders")
+    async def _bonk_purge(self, inter: Interaction):
+        await self.bot.db.remove_all_user_reminders(inter.user.id)
+        await inter.send("Removed all reminders!", ephemeral=True)
 
     @commands.Cog.listener("on_ready")
     async def _bonk_on_ready(self) -> None:
         bonks = await self.bot.db.get_all_reminders()
 
-        for bonk in bonks:
-            time_left = time.time() - bonk[1]
+        for reminder_id, reminder_details in bonks.items():
+            time_left: int = reminder_details["end"] - time.time()
             if time_left < 0:
-                await self.remind(bonk)
+                await self.remind(
+                    reminder_id, reminder_details["user_id"], reminder_details["start"], reminder_details["message"]
+                )
             else:
-                await self.bot.loop.call_later(time_left, asyncio.create_task, self.remind(bonk))
+                await self.bot.loop.call_later(
+                    time_left,
+                    asyncio.create_task,
+                    self.remind(
+                        reminder_id, reminder_details["user_id"], reminder_details["start"], reminder_details["message"]
+                    ),
+                )
 
 
-async def setup(bot: APBot):
-    await bot.add_cog(Bonk(bot), guilds=[Object(id=bot.guild_id)])
+def setup(bot: APBot):
+    bot.add_cog(Bonk(bot))

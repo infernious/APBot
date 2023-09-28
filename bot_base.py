@@ -1,78 +1,20 @@
-import time
-from datetime import datetime
 from typing import Optional, Union
 
-import discord
 import motor.motor_asyncio as motor
-from discord import Guild, Member, Message, Role, User
-from discord.abc import GuildChannel
-from discord.ext import commands
+from nextcord import Guild, Member, Message, Role, User
+from nextcord.abc import GuildChannel
+from nextcord.ext import commands
 
 from config_handler import Config
 from database_handler import Database
-from pyloggor import pyloggor
 
-from nextcord import Color
 
 class APBot(commands.Bot):
-    def __init__(self):
-        self.config = Config("config.json")
-        self.db = Database(self.config)
-        self.guild_id = self.config.get("guild_id")
-        self.logger = pyloggor(project_root=self.config.get("project_root", "APBot"))
-
-        if not self.guild_id:
-            self.logger.log("CRITICAL", "BOOT", msg="Guild ID not found in config.json, exiting.")
-            raise SystemExit
-
-        default_colors = {
-            "yellow": 0xFFFF00,
-            "orange": 0xFFA500,
-            "light_orange": 0xFFA07A,
-            "dark_orange": 0xFF5733,
-            "red": 0xFF0000,
-            "green": 0x00FF00,
-            "blue": 0x00FFFF,
-        }
-
-        default_colors.update({i: int(j, 16) for i, j in self.config.get("colors", {}).items()})
-        self.colors = default_colors
-        super().__init__(
-            command_prefix=self.config.get("command_prefix", "ap:"),
-            intents=discord.Intents.all(),
-            activity=discord.Activity(type=discord.ActivityType.playing, name="DM me to contact mods!"),
-        )
-
-    def run(self):
-        super().run(self.config.get("bot_token"))
-
-    async def setup_hook(self) -> None:
-        initial_extensions = [
-            "cogs.errorhandler",
-            "cogs.events",
-            "cogs.moderation.appeal",
-            "cogs.moderation.commands",
-            "cogs.moderation.decay",
-            "cogs.modmail",
-            "cogs.rolereact",
-            "cogs.study",
-            "cogs.focus",
-            "cogs.bonk"
-            "jishaku"
-            # 'cogs.threads',
-        ]
-
-        for extension in initial_extensions:
-            await self.load_extension(extension)
-        await self.tree.sync(guild=discord.Object(id=self.guild_id))
-
-    async def on_ready(self):
-        self.guild = await self.getch_guild(self.guild_id)
-        if not self.guild:
-            self.logger.log("CRITICAL", "BOOT", msg="Guild not found, exiting.")
-            raise SystemExit
-
-        self.logger.log("INFO", "BOOT", msg=f"Logged in as {self.user} at {datetime.fromtimestamp(time.time()).strftime(r'%d-%b-%y, %H:%M:%S')} (GMT)")
+    guild: Guild
+    db: Database
+    config: Config
+    colors: dict
+    rolemenu_view_set: bool
 
     async def getch_guild(self, guild_id: int) -> Optional[Guild]:
         """Looks up a guild in cache or fetches if not found."""
@@ -154,3 +96,6 @@ class APBot(commands.Bot):
             return message
         except:
             return None
+
+    async def resync_slash_commands(self) -> None:
+        await self.guild.sync_application_commands()

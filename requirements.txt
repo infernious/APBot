@@ -1,5 +1,4 @@
 orjson
-discord.py
+nextcord
 motor
-pyloggor
-jishaku
+jishaku==2.4.0

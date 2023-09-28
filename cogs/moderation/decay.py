@@ -1,9 +1,10 @@
 import asyncio
 import datetime
 
-from bot_base import APBot
-from nextcord import Embed, Object
+from nextcord import Embed
 from nextcord.ext import commands, tasks
+
+from bot_base import APBot
 
 
 class Decay(commands.Cog):
@@ -52,5 +53,5 @@ class Decay(commands.Cog):
             await asyncio.sleep(time_diff)
 
 
-async def setup(bot: APBot) -> None:
-    await bot.add_cog(Decay(bot), guilds=[Object(id=bot.guild_id)])
+def setup(bot: APBot) -> None:
+    bot.add_cog(Decay(bot))
