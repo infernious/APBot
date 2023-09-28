@@ -9,6 +9,7 @@ from bot_base import APBot
 from config_handler import Config
 from database_handler import Database
 
+import os
 conf = Config("config.json")
 
 bot: APBot = APBot(
@@ -77,4 +78,4 @@ bot.db = Database(conf)
 
 bot.owner_ids = conf.get("owner_ids", [])
 bot.loop.create_task(startup(bot.config))
-bot.run(bot.config.get("bot_token"))
+bot.run(os.environ.get("APBOT_BOT_TOKEN"))

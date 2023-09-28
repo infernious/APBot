@@ -11,7 +11,7 @@ from config_handler import Config
 class Database:
     def __init__(self, conf: Config):
         self.bot_user_id: int
-        self.database_client = motor.AsyncIOMotorClient(os.environ.get("DATABASE_PASSWORD"))
+        self.database_client = motor.AsyncIOMotorClient(os.environ.get("APBOT_DATABASE_CONNECT_URL"))
         self.database = self.database_client["ap-students"]
         self.user_config = self.database["user_config"]
         self.conf = conf
