@@ -37,5 +37,13 @@
     "red": "0xFF0000",
     "green": "0x00FF00",
     "blue": "0x00FFFF"
+  },
+  "recurrent_config": {
+    "1000": {
+      "limit": 100,
+      "dicts": [
+        {...}
+      ]
+    }
   }
 }

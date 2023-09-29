@@ -29,6 +29,7 @@ cogs: List[str] = [
     # "cogs.errorhandler",
     # "cogs.events",
     # "cogs.modmail",
+    # "cogs.recurrent"
     # "cogs.special",
     # "cogs.study",
     # "cogs.rolemenu"
