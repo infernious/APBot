@@ -1,10 +1,9 @@
 import discord
 from discord import app_commands
-from discord.ext import tasks, commands
+from discord.ext import commands
+from cogs.utils import convert_time
 
 import re
-import os
-import time
 import datetime
 import motor.motor_asyncio as motor
 
@@ -15,35 +14,8 @@ dark_orange = 0xff5733
 red = 0xff0000
 green = 0x00ff00
 
-time_regex = re.compile("(?:(\d{1,5})(h|s|m|d))+?")
-time_dict = {"h": 3600, "hr": 3600, "hour": 3600, "hours": 3600,
-             " h": 3600, " hr": 3600, " hour": 3600, " hours": 3600,
-             "s": 1, "sec": 1, "seconds": 1, "second": 1,
-             " s": 1, " sec": 1, " seconds": 1, " second": 1,
-             "m": 60, "min": 60, "minute": 60, "minutes": 60,
-             " m": 60, " min": 60, " minute": 60, " minutes": 60,
-             "d": 86400, "day": 86400, "days": 86400,
-             " d": 86400, " day": 86400, " days": 86400}
-
-async def convert(argument):
-    """
-    Convert time string for mute commands into integer representing seconds.
-    """
-    args = argument.lower()
-    matches = re.findall(time_regex, args)
-    time = 0
-    for v, k in matches:
-        try:
-            time += time_dict[k] * float(v)
-        except KeyError:
-            raise commands.BadArgument("{} is an invalid time-key! h/m/s/d are valid!".format(k))
-        except ValueError:
-            raise commands.BadArgument("{} is not a number!".format(v))
-    return time
-
 
 class BanAppeal(discord.ui.Modal, title="Ban Appeal"):
-
     def __init__(self, bot):
         super().__init__()
         self.bot = bot

@@ -1,80 +1,83 @@
+import time
+from datetime import datetime
+from typing import List
+
+from discord import Guild
+from nextcord import Activity, ActivityType, Intents
+
+from bot_base import APBot
+from config_handler import Config
+from database_handler import Database
+
 import os
-import json
-import motor.motor_asyncio as motor
+conf = Config("config.json")
 
-import discord
-from discord.ext import commands
+bot: APBot = APBot(
+    command_prefix=conf.get("command_prefix", "ap:"),
+    strip_after_prefix=True,
+    intents=Intents.all(),
+    activity=Activity(type=ActivityType.playing, name="DM me to contact mods!"),
+    default_guild_ids=[conf.get("guild_id")],
+)
 
-database_password = os.environ.get("DATABASE_PASSWORD")
-db_client = motor.AsyncIOMotorClient(database_password)
-db = db_client["ap-students"]
+cogs: List[str] = [
+    "jishaku",
+    # "cogs.moderation.appeal",
+    # "cogs.moderation.commands",
+    # "cogs.moderation.decay",
+    "cogs.bonk",
+    # "cogs.errorhandler",
+    # "cogs.events",
+    # "cogs.modmail",
+    # "cogs.recurrent"
+    # "cogs.special",
+    "cogs.study",
+    "cogs.question",
 
-config_file = open('config.json')
-config = json.load(config_file)
-
-
-class APBot(commands.Bot):
-
-    def __init__(self):
-        super().__init__(
-            command_prefix=config["command_prefix"],
-            intents=discord.Intents.all(),
-            application_id=config["application_id"],
-        )
-
-    async def setup_hook(self) -> None:
-        initial_extensions = ['cogs.errorhandler',
-                              'cogs.events',
-                              'cogs.meta',
-                              'cogs.moderation.appeal',
-                              'cogs.moderation.commands',
-                              'cogs.moderation.decay',
-                              'cogs.modmail',
-                              'cogs.rolereact',
-                              'cogs.study',
-                              # 'cogs.threads',
-                              ]
-        for extension in initial_extensions:
-            await self.load_extension(extension)
-        await bot.tree.sync(guild=discord.Object(id=config["guild_id"]))
-
-    async def on_ready(self):
-        await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.playing, name="DM me to contact mods!"))
-        print(f'Joined: {bot.user}')
-
-    async def read_user_config(self, user_id: int):
-
-        config_from_db = await db["user_config"].find_one({"user_id": user_id})
-
-        if config_from_db is None:
-            config_from_db = {
-                "user_id": user_id,
-                "infraction_points": 0,
-                "infractions": []
-            }
-            await db["user_config"].insert_one(config_from_db)
-
-        return config_from_db
-
-    async def update_user_config(self, user_id: int, new_config):
-
-        old_config = await db["user_config"].find_one({"user_id": user_id})
-
-        if old_config is None:
-            config = {
-                "user_id": user_id,
-                "infraction_points": 0,
-                "infractions": []
-            }
-            old_config = await db["user_config"].insert_one(config)
-
-        _id = old_config['_id']
-        await db["user_config"].replace_one({"_id": _id}, new_config)
+]
 
 
-bot = APBot()
-bot.guild_id = config["guild_id"]
-bot.user_config = db["user_config"]
+@bot.event
+async def on_ready() -> None:
+    bot.owner_ids = bot.config.get("owner_ids", [])
+    print(f"Logged in as {bot.user} at {datetime.fromtimestamp(time.time()).strftime(r'%d-%b-%y, %H:%M:%S')}")
 
-token = os.environ.get("DISCORD_BOT_SECRET")
-bot.run(token)
+
+async def startup(conf: Config):
+    bot.rolemenu_view_set = False
+    for extension in cogs:
+        try:
+            bot.load_extension(extension)
+            print(f"Successfully loaded extension {extension}")
+        except Exception as e:
+            print(f"Failed to load extension {extension}\n{type(e).__name__,}: {e}")
+
+    await bot.wait_until_ready()
+
+    bot.guild: Guild = await bot.getch_guild(conf.get("guild_id"))
+    bot.db.bot_user_id = bot.user.id
+
+    await bot.resync_slash_commands()
+    print("All Ready")
+
+
+default_colors = {
+    "yellow": 0xFFFF00,
+    "orange": 0xFFA500,
+    "light_orange": 0xFFA07A,
+    "dark_orange": 0xFF5733,
+    "red": 0xFF0000,
+    "green": 0x00FF00,
+    "blue": 0x00FFFF,
+}
+
+default_colors.update({i: int(j, 16) for i, j in conf.get("colors", {}).items()})
+bot.colors = default_colors
+
+
+bot.config = conf
+bot.db = Database(conf)
+
+
+bot.loop.create_task(startup(bot.config))
+bot.run(os.environ.get("APBOT_BOT_TOKEN"))
