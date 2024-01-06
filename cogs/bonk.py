@@ -16,6 +16,9 @@ class Bonk(commands.Cog):
         self.bot = bot
 
     async def remind(self, reminder_id: str, user_id: int, start_time: int, message: str) -> None:
+        if reminder_id not in await self.bot.db.get_all_user_reminders(user_id):
+            return
+
         await self.bot.db.remove_reminder(user_id, reminder_id)
         user = await self.bot.getch_user(user_id)
 
@@ -37,6 +40,7 @@ class Bonk(commands.Cog):
     ) -> None:
         if len(await self.bot.db.get_all_user_reminders(inter.user.id)) >= 25:
             return await inter.send("You can't have more than 25 reminders at once!")
+
         duration: Union[str, int] = convert_time(duration)
         if isinstance(duration, str):
             return await inter.send(duration, ephemeral=True)
@@ -46,6 +50,7 @@ class Bonk(commands.Cog):
 
         start_time = int(time.time())
         end_time = start_time + duration
+
         reminder_id = uuid4().hex
         await self.bot.db.set_reminder(reminder_id, inter.user.id, start_time, end_time, message)
 
@@ -67,7 +72,7 @@ class Bonk(commands.Cog):
         formatted_reminders: List[str] = []
         for ind, reminder in enumerate(user_reminders):
             prefix = f"{ind}. "
-            time_str = f"Reminder <t:{int(reminder['end'])}:R>" + " - "
+            time_str = f"Reminder <t:{int(reminder['end_time'])}:R>" + " - "
             reminder_message = reminder["message"] or ""
             avail_chars = 50 - len(prefix) - len(time_str)
             if len(reminder_message) > avail_chars:
@@ -88,25 +93,22 @@ class Bonk(commands.Cog):
     async def _bonk_remove(
         self,
         inter: Interaction,
-        reminder_id: str = SlashOption(
+        reminder: str = SlashOption(
             name="reminder",
             description="Which reminder to remove.",
         ),
     ):
-        user_reminders = await self.bot.db.get_all_user_reminders(inter.user.id)
-        if len(user_reminders) == 0:
-            return await inter.response.send_message("You have no set reminders!", ephemeral=True)
-
-        await self.bot.db.remove_reminder(inter.user.id, reminder_id)
+        await self.bot.db.remove_reminder(inter.user.id, reminder)
         await inter.response.send_message("Removed reminder.", ephemeral=True)
 
-    @_bonk_remove.on_autocomplete("reminder_id")
+    @_bonk_remove.on_autocomplete("reminder")
     async def _bonk_remve_autocomplete(self, inter: Interaction, reminder_id: str):
         formatted_choices = {}
         user_reminders = await self.bot.db.get_all_user_reminders(inter.user.id)
+
         for ind, (reminder_id, reminder_details) in enumerate(user_reminders.items()):
             prefix: str = f"{ind+1}. "
-            time_str: str = "Reminder at " + dt.fromtimestamp(reminder_details["end"]).strftime("%m %b %Y %H:%M:%S") + " - "
+            time_str: str = "Reminder at " + dt.fromtimestamp(reminder_details["end_time"]).strftime("%m %b %Y %H:%M:%S") + " - "
             reminder_message = reminder_details["message"] or ""
             avail_chars = 100 - len(prefix) - len(time_str)
             if len(reminder_message) > avail_chars:
@@ -126,17 +128,17 @@ class Bonk(commands.Cog):
         bonks = await self.bot.db.get_all_reminders()
 
         for reminder_id, reminder_details in bonks.items():
-            time_left: int = reminder_details["end"] - time.time()
+            time_left: int = reminder_details["end_time"] - time.time()
             if time_left < 0:
                 await self.remind(
-                    reminder_id, reminder_details["user_id"], reminder_details["start"], reminder_details["message"]
+                    reminder_id, reminder_details["user_id"], reminder_details["start_time"], reminder_details["message"]
                 )
             else:
-                await self.bot.loop.call_later(
+                self.bot.loop.call_later(
                     time_left,
                     asyncio.create_task,
                     self.remind(
-                        reminder_id, reminder_details["user_id"], reminder_details["start"], reminder_details["message"]
+                        reminder_id, reminder_details["user_id"], reminder_details["start_time"], reminder_details["message"]
                     ),
                 )
 

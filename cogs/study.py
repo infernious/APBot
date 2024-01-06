@@ -8,6 +8,7 @@ from nextcord.ext import commands
 from bot_base import APBot
 from cogs.utils import convert_time
 
+import nextcord
 
 class Study(commands.Cog):
     def __init__(self, bot: APBot) -> None:
@@ -25,6 +26,7 @@ class Study(commands.Cog):
 
         await self.bot.db.delete_study_user(user_id)
         await user.remove_roles(role)
+    
 
     @slash_command(name="study", description="Prevent yourself from viewing unhelpful channels.")
     async def study(
@@ -38,32 +40,36 @@ class Study(commands.Cog):
             - Gives study role to member.
             - Updates user document in the database collection with datetime to remove the study role.
         """
+        await inter.response.defer(ephemeral=True)
+
+        resp = await inter.send("Validating time input...", ephemeral=True)
 
         duration: Union[str, int] = convert_time(duration)
         if isinstance(duration, str):
-            return await inter.send(duration, ephemeral=True)
+            return await resp.edit(content=duration)
 
         if duration < 60 * 10:
-            return await inter.send("Please set a duration greater than 10 minutes!", ephemeral=True)
+            return await resp.edit("Please set a duration greater than 10 minutes!")
         if duration > 60 * 60 * 24 * 7:
-            return await inter.send("Please set a duration lesser than a week", ephemeral=True)
+            return await resp.edit("Please set a duration lesser than a week")
+
+        await resp.edit("Performing actions...")
+        study_end = int(time.time()) + duration
 
         study_role_id = self.bot.config.get("study_role_id")
 
         if study_role_id in [i.id for i in inter.user.roles]:
-            end = await self.bot.db.get_user_study_end(inter.user.id)
-            if not end:
-                return await inter.send("There appears to be a bug within me :( Please contact the mods!", ephemeral=True)
-            return await inter.send(f"You're already studying :) It will automatically be removed <t:{end}:R>", ephemeral=True)
+            await resp.edit("Removing role...")
+            await self.remove_study_role(inter.user.id)
 
         await inter.user.add_roles(await self.bot.getch_role(self.bot.guild.id, study_role_id))
+        await resp.edit("Updating database...")
 
-        study_end = int(time.time()) + duration
         await self.bot.db.set_user_study_end(inter.user.id, study_end)
 
         self.bot.loop.call_later(duration, asyncio.create_task, self.remove_study_role(inter.user.id))
-        await inter.response.send_message(
-            f"The study role will be removed <t:{study_end}:R> at <t:{study_end}:f>.", ephemeral=True
+        await resp.edit(
+            f"The study role will be removed <t:{study_end}:R> at <t:{study_end}:f>."
         )
 
     @commands.Cog.listener()

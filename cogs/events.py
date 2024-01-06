@@ -21,12 +21,8 @@ class EventAnnouncement(ui.View):
         if not role:
             return await inter.send("There appears to be a bug within me, please report this :)", ephemeral=True)
 
-        if role in inter.user.roles:
-            await inter.user.remove_roles(role)
-            await inter.response.send_message(f"`{role.name}` role removed!", ephemeral=True)
-        else:
-            await inter.user.add_roles(role)
-            await inter.response.send_message(f"`{role.name}` role added!", ephemeral=True)
+        await inter.user.add_roles(role)
+        await inter.response.send_message(f"`{role.name}` role added!", ephemeral=True)
 
 
 class EventConfirm(ui.View):
@@ -51,27 +47,30 @@ class Events(commands.Cog):
 
     @slash_command(name="eventannounce", description="Announce an event in the #events channel.")
     async def eventannounce(self, inter: Interaction):
+        await inter.response.defer(ephemeral=True)
+        resp = await inter.send("Validating authorization...", ephemeral=True)
+
         if self.bot.config.get("event_coordinator_role_id") not in [i.id for i in inter.user.roles]:
-            return await inter.send("You are not allowed to run that command!", ephemeral=True)
+            return await resp.edit("You are not allowed to run that command!")
 
         view = EventConfirm()
-        await inter.send(
-            "Please confirm that you would like to **ping the events role** in the events channel.", view=view, ephemeral=True
+        await resp.edit(
+            "Please confirm that you would like to **ping the events role** in the events channel.", view=view
         )
         await view.wait()
 
         if view.value is None:
-            return await inter.edit_original_message(content="Timed out.", view=None)
+            return await resp.edit("Timed out.", view=None)
         elif not view.value:
-            return await inter.edit_original_message(content="Cancelled.", view=None)
+            return await resp.edit("Cancelled.", view=None)
 
         event_role = await self.bot.getch_role(self.bot.guild.id, self.bot.config.get("events_role_id"))
         event_channel: Optional[TextChannel] = await self.bot.getch_channel(self.bot.config.get("events_channel_id"))
         if not event_channel or not event_role:
-            return await inter.send("Failed to get events role/channel.", ephemeral=True)
+            return await resp.edit("Failed to get events role/channel.")
 
         await event_channel.send(event_role.mention, view=EventAnnouncement(self.bot))
-        return await inter.edit_original_message(content="Done!", view=None)
+        return await resp.edit("Done!", view=None)
 
 
 def setup(bot: APBot):

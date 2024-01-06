@@ -16,7 +16,6 @@ green = 0x00ff00
 
 
 class BanAppeal(discord.ui.Modal, title="Ban Appeal"):
-
     def __init__(self, bot):
         super().__init__()
         self.bot = bot

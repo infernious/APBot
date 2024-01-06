@@ -1,4 +1,4 @@
-from nextcord import Message, TextChannel, Thread, Embed, slash_command, SlashOption, Interaction, Attachment, User
+from nextcord import Message, TextChannel, Thread, Embed, slash_command, SlashOption, Interaction, Attachment, User, MessageReference
 from nextcord.ext import commands, application_checks
 
 from bot_base import APBot
@@ -23,15 +23,19 @@ class Modmail(commands.Cog):
 
         if message.guild or message.author == self.bot.user or message.author not in self.bot.guild.members:
             return
-        
+
         if message.author.id in await self.bot.db.get_modmail_banned_users():
             return
 
         await message.add_reaction("✅")
 
+        content = message.content or "No content"
+
+        # add handling to send messages > 2000 chars
+
         modmail_embed = Embed(
             title="",
-            description=message.content,
+            description=f"```\n{content}\n```",
             color=self.bot.colors["blue"],
         ).set_author(
             name=message.author.display_name,
@@ -58,11 +62,10 @@ class Modmail(commands.Cog):
         for ind, attachment in enumerate(message.attachments):
             await thread.send(
                 embed=Embed(
-                    title=f"Attachment {ind} / {len(message.attachments)}",
+                    title=f"Attachment {ind+1} / {len(message.attachments)}",
                     color=self.bot.colors["blue"]
                 ).set_author(
                     name=message.author.name,
-                    url=f"discord://-/users/{message.author.id}",
                     icon_url=message.author.avatar.url
                 ).set_image(
                     url=attachment.url
@@ -77,7 +80,7 @@ class Modmail(commands.Cog):
         message: str = SlashOption(
             name="message",
             description="Message to send to the user",
-            required=True
+            required=False
         ),
         attachment: Attachment = SlashOption(
             name="attachment",
@@ -93,10 +96,13 @@ class Modmail(commands.Cog):
 
         if inter.channel.parent_id != self.bot.config.get("modmail_channel"):
             return await inter.send("You can use that only in modmail threads.", ephemeral=True)
+        
+        if not message and not attachment:
+            return await inter.send("You must specify a message or an attachment!", ephemeral=True)
 
         user = await self.bot.getch_user(int(inter.channel.name.split(" ")[-1]))
         send_embed = Embed(
-            title="Message from the mods!",
+            title="Message from the mods.",
             description=message,
             color=self.bot.colors["orange"]
         )
@@ -108,8 +114,7 @@ class Modmail(commands.Cog):
         response_embed = Embed(
             title=f"Message sent to {user.name}",
             description=f"```\n{message}\n```",
-            color=self.bot.colors["orange"],
-            
+            color=self.bot.colors["orange"]
         )
 
         if attachment:
@@ -122,6 +127,7 @@ class Modmail(commands.Cog):
     async def _mm_archive(self, inter: Interaction):
         if inter.channel.parent_id != self.bot.config.get("modmail_channel"):
             return await inter.send("You can use that only in modmail threads.", ephemeral=True)
+
         await inter.channel.edit(archived=True)
         await inter.send("Archived this thread.", ephemeral=True)
 

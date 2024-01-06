@@ -1,12 +1,13 @@
 from typing import Optional, Union
 
 import motor.motor_asyncio as motor
-from nextcord import Guild, Member, Message, Role, User
+from nextcord import Guild, Member, Message, Role, User, MessageReference
 from nextcord.abc import GuildChannel
 from nextcord.ext import commands
 
 from config_handler import Config
 from database_handler import Database
+
 
 
 class APBot(commands.Bot):
@@ -31,9 +32,12 @@ class APBot(commands.Bot):
     async def getch_role(self, guild_id: int, role_id: int) -> Optional[Role]:
         """Looks up a guild in cache or fetches if not found."""
         guild: Optional[Guild] = await self.getch_guild(guild_id)
+
         if not guild:
             return False
+
         role: Optional[Role] = guild.get_role(role_id)
+
         if role:
             return role
         else:

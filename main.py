@@ -22,23 +22,24 @@ bot: APBot = APBot(
 
 cogs: List[str] = [
     "jishaku",
-    "cogs.moderation.appeal",
+    # "cogs.moderation.appeal",
     # "cogs.moderation.commands",
     # "cogs.moderation.decay",
-    # "cogs.bonk",
+    "cogs.bonk",
     # "cogs.errorhandler",
     # "cogs.events",
     # "cogs.modmail",
     # "cogs.recurrent"
     # "cogs.special",
-    # "cogs.study",
-    # "cogs.rolemenu"
-    # "cogs.rolereact",
+    "cogs.study",
+    "cogs.question",
+
 ]
 
 
 @bot.event
 async def on_ready() -> None:
+    bot.owner_ids = bot.config.get("owner_ids", [])
     print(f"Logged in as {bot.user} at {datetime.fromtimestamp(time.time()).strftime(r'%d-%b-%y, %H:%M:%S')}")
 
 
@@ -77,6 +78,6 @@ bot.colors = default_colors
 bot.config = conf
 bot.db = Database(conf)
 
-bot.owner_ids = conf.get("owner_ids", [])
+
 bot.loop.create_task(startup(bot.config))
 bot.run(os.environ.get("APBOT_BOT_TOKEN"))

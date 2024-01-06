@@ -12,12 +12,20 @@ class Recurrent(commands.Cog):
     @commands.Cog.listener("on_message")
     async def _recurrent_on_message(self, message: Message) -> None:
         conf = self.bot.config.get("recurrent_config")
+
         if message.channel.id not in [int(i) for i in conf.keys()]:
             return
+
         channel_config = conf[str(message.channel.id)]
         self.message_count_cache[message.channel.id] += 1
+
         if self.message_count_cache[message.channel.id] < channel_config["limit"]:
             return
-        chosen_one = random.choice(channel_config["dicts"])
-        await message.channel.send(embed=Embed.from_dict(chosen_one))
+
         self.message_count_cache[message.channel.id] = 0
+
+        await message.channel.send(embed=Embed.from_dict(random.choice(channel_config["dicts"])))
+
+
+def setup(bot: APBot):
+    bot.add_cog(Recurrent(bot))
