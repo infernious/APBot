@@ -9,10 +9,11 @@ blue = 0x00ffff
 
 class QuestionConfirm(discord.ui.View):
 
-    def __init__(self, bot, message):
+    def __init__(self, bot, message, asker_id):
         super().__init__(timeout=None)
         self.bot = bot
         self.message = message
+        self.asker_id = asker_id
 
     @discord.ui.button(label='Confirm!', style=discord.ButtonStyle.green)
     async def callback(self, interaction, button):
@@ -20,6 +21,10 @@ class QuestionConfirm(discord.ui.View):
         """
         Confirm mention after command is used as to avoid accidental pings.
         """
+
+        if interaction.user.id != self.asker_id:
+            await interaction.response.send_message(content="Only the person who asked the question may ping!", ephemeral=True)
+            return
 
         for role in interaction.channel.changed_roles:
             if "Helper" in role.name:
@@ -110,7 +115,7 @@ class Study(commands.Cog):
                                  inline=False)
 
         ping_helpers = await interaction.channel.send(f"{interaction.user.mention}", embed=question_embed)
-        await ping_helpers.edit(view=QuestionConfirm(self.bot, ping_helpers))
+        await ping_helpers.edit(view=QuestionConfirm(self.bot, ping_helpers, interaction.user.id))
 
     @app_commands.checks.cooldown(1, 86400, key=lambda i: i.channel_id)
     @app_commands.command(name='potd', description='Make a problem-of-the-day for a subject channel.')
