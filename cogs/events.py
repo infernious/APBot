@@ -1,74 +1,77 @@
-import discord
-from discord import app_commands
-from discord.ext import commands
+from typing import Optional
+
+from nextcord import ButtonStyle, Interaction, TextChannel, slash_command, ui
+from nextcord.ext import commands
+
+from bot_base import APBot
 
 
-blue = 0x00ffff
-
-
-class EventAnnouncement(discord.ui.View):
-
-    def __init__(self, bot):
+class EventAnnouncement(ui.View):
+    def __init__(self, bot: APBot):
         super().__init__()
         self.bot = bot
 
-    @discord.ui.button(label='Click here to be notified for future events!', style=discord.ButtonStyle.gray)
-    async def callback(self, interaction, button):
-
+    @ui.button(label="Click here to be notified for future events!", style=ButtonStyle.gray)
+    async def callback(self, button: ui.Button, inter: Interaction):
         """
         Give the "Lounge: Events" role to the interaction user.
         """
 
-        role = discord.utils.get(interaction.guild.roles, name="Lounge: Events")
-        member = interaction.guild.get_member(interaction.user.id)
+        role = await self.bot.getch_role(self.bot.guild.id, self.bot.config.get("events_role_id"))
+        if not role:
+            return await inter.send("There appears to be a bug within me, please report this :)", ephemeral=True)
 
-        if role in member.roles:
-            await member.remove_roles(role)
-            await interaction.response.send_message(f"`{role.name}` role removed!", ephemeral=True)
-        else:
-            await member.add_roles(role)
-            await interaction.response.send_message(f"`{role.name}` role added!", ephemeral=True)
+        await inter.user.add_roles(role)
+        await inter.response.send_message(f"`{role.name}` role added!", ephemeral=True)
 
 
-class EventConfirm(discord.ui.View):
-
-    def __init__(self, bot):
+class EventConfirm(ui.View):
+    def __init__(self):
         super().__init__()
-        self.bot = bot
+        self.value = None
 
-    @discord.ui.button(label='Confirm!', emoji='✅', style=discord.ButtonStyle.green)
-    async def callback(self, interaction, button):
+    @ui.button(label="Confirm!", emoji="✅", style=ButtonStyle.green)
+    async def confirm(self, button: ui.Button, inter: Interaction):
+        self.value = True
+        self.stop()
 
-        """
-        Confirm mention after command is used as to avoid accidental pings.
-        """
-
-        event_role = discord.utils.get(interaction.guild.roles, name="Lounge: Events")
-        event_channel = discord.utils.get(interaction.guild.channels, name="events")
-
-        await event_channel.send(f"{event_role.mention}", view=EventAnnouncement(self.bot))
-
-        button.style = discord.ButtonStyle.grey
-        button.label = "Event announced!"
-        button.disabled = True
-
-        await interaction.response.edit_message(view=self)
-        await interaction.message.delete()
-
+    @ui.button(label="Cancel", emoji="❌", style=ButtonStyle.grey)
+    async def cancel(self, button: ui.Button, inter: Interaction):
+        self.value = False
         self.stop()
 
 
 class Events(commands.Cog):
-
-    def __init__(self, bot: commands.Bot) -> None:
+    def __init__(self, bot: APBot) -> None:
         self.bot = bot
 
-    @app_commands.checks.has_role("Event Coordinator")
-    @app_commands.command(name='eventannounce', description='Announce an event in the #events channel.')
-    async def eventannounce(self, interaction: discord.Interaction):
+    @slash_command(name="eventannounce", description="Announce an event in the #events channel.")
+    async def eventannounce(self, inter: Interaction):
+        await inter.response.defer(ephemeral=True)
+        resp = await inter.send("Validating authorization...", ephemeral=True)
 
-        await interaction.response.send_message("Please confirm that you would like to **ping the events role** in the events channel.", view=EventConfirm(self.bot))
+        if self.bot.config.get("event_coordinator_role_id") not in [i.id for i in inter.user.roles]:
+            return await resp.edit("You are not allowed to run that command!")
+
+        view = EventConfirm()
+        await resp.edit(
+            "Please confirm that you would like to **ping the events role** in the events channel.", view=view
+        )
+        await view.wait()
+
+        if view.value is None:
+            return await resp.edit("Timed out.", view=None)
+        elif not view.value:
+            return await resp.edit("Cancelled.", view=None)
+
+        event_role = await self.bot.getch_role(self.bot.guild.id, self.bot.config.get("events_role_id"))
+        event_channel: Optional[TextChannel] = await self.bot.getch_channel(self.bot.config.get("events_channel_id"))
+        if not event_channel or not event_role:
+            return await resp.edit("Failed to get events role/channel.")
+
+        await event_channel.send(event_role.mention, view=EventAnnouncement(self.bot))
+        return await resp.edit("Done!", view=None)
 
 
-async def setup(bot):
-    await bot.add_cog(Events(bot), guilds=[discord.Object(id=bot.guild_id)])
+def setup(bot: APBot):
+    bot.add_cog(Events(bot))
