@@ -1,15 +1,15 @@
 import motor
 import io
-import discord
-from discord.ext import commands
-from discord import app_commands
+import nextcord
+from nextcord.ext import commands
+from nextcord import app_commands
 
 ROLE_CAN_MAKE_TAGS = ["Chat Moderator", "Admin", "Honorable"]
 
-FAILURE_EMBED = discord.Embed(colour=discord.Colour.red())
-SUCCESS_EMBED = discord.Embed(colour=discord.Colour.green())
+FAILURE_EMBED = nextcord.Embed(colour=nextcord.Colour.red())
+SUCCESS_EMBED = nextcord.Embed(colour=nextcord.Colour.green())
 
-ALLOWED_MENTIONS = discord.AllowedMentions.none()
+ALLOWED_MENTIONS = nextcord.AllowedMentions.none()
 ALLOWED_MENTIONS.replied_user = True
 
 DISCORD_FILE_LIMIT = 10
@@ -68,20 +68,20 @@ class TagDb:
         return list(map(lambda tag: tag["name"], tags))
 
 
-class TagNameTextbox(discord.ui.Modal):
+class TagNameTextbox(nextcord.ui.Modal):
     """
     A text box to let a user chose a tag name
     """
 
-    tag_name = discord.ui.TextInput(label="Type tag name here", placeholder="tag name")
+    tag_name = nextcord.ui.TextInput(label="Type tag name here", placeholder="tag name")
 
-    def __init__(self, tag_content: discord.Message, tag_db: TagDb):
+    def __init__(self, tag_content: nextcord.Message, tag_db: TagDb):
 
         super().__init__(title="Tag Name")
         self.tag_content = tag_content
         self.tag_db = tag_db
 
-    async def on_submit(self, interaction: discord.Interaction): 
+    async def on_submit(self, interaction: nextcord.Interaction): 
 
         # TODO: beg python devs for async-await in lambdas and/or list comprehension
         new_attachments = []
@@ -103,7 +103,7 @@ class TagNameTextbox(discord.ui.Modal):
         await interaction.response.send_message(embed=embed)
 
 
-def can_make_tags(interaction: discord.Interaction) -> bool:
+def can_make_tags(interaction: nextcord.Interaction) -> bool:
 
     check = any([role.name in ROLE_CAN_MAKE_TAGS for role in interaction.user.roles])
     if not check:
@@ -117,7 +117,7 @@ class Tags(commands.Cog):
     Because getting asked for study resources all the time is annoying :(
     """
 
-    async def new_tag(self, interaction: discord.Interaction, message: discord.Message):
+    async def new_tag(self, interaction: nextcord.Interaction, message: nextcord.Message):
         """
         Creates a new tag that any user can use.
         """
@@ -134,7 +134,7 @@ class Tags(commands.Cog):
         self.bot.tree.add_command(new_tag_menu)
 
     @app_commands.command(name='tag', description="Uses a tag, replying to the user with the tag contents.")
-    async def use_tag(self, interaction: discord.Interaction, tag_name: str):
+    async def use_tag(self, interaction: nextcord.Interaction, tag_name: str):
         """
         Uses a tag, replying to the user with the tag contents.
         """
@@ -143,7 +143,7 @@ class Tags(commands.Cog):
 
         maybe_tag = await self.tag_db.get_tag(tag_name)
         if maybe_tag:
-            files = [discord.File(io.BytesIO(file["data"]), filename=file["filename"]) for file in maybe_tag["attachments"]]
+            files = [nextcord.File(io.BytesIO(file["data"]), filename=file["filename"]) for file in maybe_tag["attachments"]]
             await interaction.followup.send(maybe_tag["value"], files=files, allowed_mentions=ALLOWED_MENTIONS)
         else:
             embed = FAILURE_EMBED
@@ -152,7 +152,7 @@ class Tags(commands.Cog):
 
     @app_commands.check(can_make_tags)
     @app_commands.command(name='remove_tag', description="Removes a tag, preventing it from being used.")
-    async def remove_tag(self, interaction: discord.Interaction, tag_name: str):
+    async def remove_tag(self, interaction: nextcord.Interaction, tag_name: str):
         """
         Removes a tag, preventing it from being used.
         """
@@ -174,16 +174,16 @@ class Tags(commands.Cog):
         await interaction.followup.send(embed=embed)
 
     @app_commands.command(name='listtags', description="Lists all active tags")
-    async def list_tags(self, interaction: discord.Interaction):
+    async def list_tags(self, interaction: nextcord.Interaction):
         """
         Lists all active tags
         """
 
         await interaction.response.defer()
 
-        await interaction.followup.send(embed=discord.Embed(title="Available tags", description=", ".join(await self.tag_db.list_tags())))
+        await interaction.followup.send(embed=nextcord.Embed(title="Available tags", description=", ".join(await self.tag_db.list_tags())))
 
 async def setup(bot: commands.Bot) -> None:
     tag_db = TagDb(bot.tags)
-    await bot.add_cog(Tags(bot, tag_db), guilds=[discord.Object(id=bot.guild_id)])
+    await bot.add_cog(Tags(bot, tag_db), guilds=[nextcord.Object(id=bot.guild_id)])
     await bot.tree.sync() # Necessary to make our manually added (no decorator) commands show
