@@ -33,7 +33,7 @@ cogs: List[str] = [
     # "cogs.special",
     "cogs.study",
     "cogs.question",
-
+    "cogs.tags"
 ]
 
 
