@@ -184,6 +184,6 @@ class Tags(commands.Cog):
         await interaction.followup.send(embed=nextcord.Embed(title="Available tags", description=", ".join(await self.tag_db.list_tags())))
 
 async def setup(bot: commands.Bot) -> None:
-    tag_db = TagDb(bot.tags)
+    tag_db = TagDb(bot.db.database["tags"])
     await bot.add_cog(Tags(bot, tag_db), guilds=[nextcord.Object(id=bot.guild_id)])
     await bot.tree.sync() # Necessary to make our manually added (no decorator) commands show
