@@ -1,606 +1,424 @@
-import discord
-from discord import app_commands
-from discord.ext import commands
+import time
+from datetime import datetime
+
+from nextcord import (
+    slash_command,
+    message_command,
+    Permissions,
+    Interaction,
+    Embed,
+    Member,
+    Object,
+    TextChannel,
+    SlashOption,
+    Attachment,
+    Forbidden,
+    Message,
+    Color,
+)
+from nextcord.ext import commands
+import asyncio
+from bot_base import APBot
+from typing import Union
 from cogs.utils import convert_time
-
-import re
-import datetime
-import motor.motor_asyncio as motor
-
-yellow = 0xffff00
-orange = 0xffa500
-light_orange = 0xffa07a
-dark_orange = 0xff5733
-red = 0xff0000
-green = 0x00ff00
-
-
-class BanAppeal(discord.ui.Modal, title="Ban Appeal"):
-    def __init__(self, bot):
-        super().__init__()
-        self.bot = bot
-
-    appeal = discord.ui.TextInput(
-        label="Ban Appeal",
-        style=discord.TextStyle.long,
-        placeholder="Why should your ban be appealed? We recommend waiting 1-2 weeks before answering this question.",
-        required=True,
-        max_length=750,
-    )
-
-    media = discord.ui.TextInput(
-        label = "Supporting Media",
-        style=discord.TextStyle.long,
-        placeholder='Feel free to send links to supporting media here.',
-        required=False,
-        max_length=150,
-    )
-
-    miscellaneous = discord.ui.TextInput(
-        label="Anything else?",
-        style=discord.TextStyle.long,
-        placeholder='Is there anything else you would like us to know?',
-        required=False,
-        max_length=750,
-    )
-
-    async def on_submit(self, interaction: discord.Interaction):
-
-        await interaction.response.send_message(f"Your appeal has been sent!", ephemeral=True)
-
-        guild = self.bot.get_guild(self.bot.guild_id)
-        appeal_channel = discord.utils.get(guild.channels, name="important-updates")
-        appeal_embed = discord.Embed(title="Ban Appeal", color=light_orange)
-        appeal_embed.add_field(name="User:", value=f"{interaction.user.name}#{interaction.user.discriminator}")
-        appeal_embed.add_field(name="ID:", value=f"{interaction.user.id}", inline = False)
-        appeal_embed.add_field(name="Appeal:", value=f"```\n{self.appeal.value}\n```", inline = False)
-        if self.media.value:
-            appeal_embed.add_field(name="Media Links:", value=f"{self.media.value}", inline = False)
-        if self.miscellaneous.value:
-            appeal_embed.add_field(name="Additional Information:", value=f"```\n{self.miscellaneous.value}\n```", inline = False)
-        appeal_embed.timestamp = datetime.datetime.now()
-
-        user_config = await self.bot.read_user_config(interaction.user.id)
-
-        if "appeal_message_id" in user_config:
-            appeal_message = await appeal_channel.fetch_message(user_config["appeal_message_id"])
-            appeal_thread = discord.utils.get(appeal_message.channel.threads, name=f"{interaction.user.name}#{interaction.user.discriminator} ({interaction.user.id}) Ban Appeal")
-            await appeal_thread.send("Appeal has been updated!", embed=appeal_embed)
-        else:
-            appeal_message = await appeal_channel.send(embed=appeal_embed)
-            await appeal_message.add_reaction("🟢")
-            await appeal_message.add_reaction("🟡")
-            await appeal_message.add_reaction("🔴")
-            await appeal_message.create_thread(name=f"{interaction.user.name}#{interaction.user.discriminator} ({interaction.user.id}) Ban Appeal")
-            user_config["appeal_message_id"] = appeal_message.id
-
-        user_config["check_appeal_date"] = datetime.datetime.now() + datetime.timedelta(days=14)
-        await self.bot.update_user_config(interaction.user.id, user_config)
-
-    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
-        await interaction.response.send_message('Oops! Something went wrong.', ephemeral=True)
-
-
-class BanAppealButton(discord.ui.View):
-
-    def __init__(self, bot):
-        super().__init__(timeout=None)
-        self.bot = bot
-
-    @discord.ui.button(label='Appeal Ban', style=discord.ButtonStyle.blurple, custom_id="appeal")
-    async def callback(self, interaction, button):
-        """
-        Confirm to appeal ban to bring up the modal.
-        """
-
-        await interaction.response.send_modal(BanAppeal(self.bot))
-
-    async def on_timeout(self) -> None:
-        self.callback.style = discord.ButtonStyle.grey
-        self.callback.label = "Timed out!"
-        self.callback.disabled = True
-
-        await self.message.edit(view=self)
 
 
 class ModerationCommands(commands.Cog):
-
-    def __init__(self, bot: commands.Bot) -> None:
+    def __init__(self, bot: APBot) -> None:
         self.bot = bot
-        self.ctx_menu = app_commands.ContextMenu(
-            name="Delete Message",
-            callback=self.delete
+
+    @slash_command(
+        name="warnchannel",
+        description="Send a warning to a channel and temporarily modify permissions",
+        default_member_permissions=Permissions(moderate_members=True),
+    )
+    async def warnchannel(
+        self,
+        inter: Interaction,
+        channel: TextChannel = SlashOption(
+            description="The channel to send the warning to", required=True
+        ),
+        reason: str = SlashOption(
+            description="The reason for the warning", required=True
+        ),
+    ):
+        """
+        Sends a warning message to a specified channel, disables @everyone's message permissions for 10 seconds,
+        and then sets a 15-second slowmode in the channel.
+        """
+        await inter.response.defer(ephemeral=True)
+        
+        resp = await inter.send("Processing the warning...", ephemeral=True)
+
+        # Send an embed with the warning reason
+        embed = Embed(
+            title="This channel has been warned!",
+            description=f"⚠️ {reason}",
+            color=Color.red(),
         )
-        self.bot.tree.add_command(self.ctx_menu)
+        embed.set_footer(text="This channel will be unlocked in 1 minute.")
+        await channel.send(embed=embed)
 
-    async def cog_unload(self) -> None:
-        self.bot.tree.remove_command(self.ctx_menu.name, type=self.ctx_menu.type)
+        # Temporarily change permissions
+        await channel.set_permissions(inter.guild.default_role, send_messages=False)
+        await resp.edit(f"Warning sent to {channel.mention}.")
 
-    @app_commands.checks.has_permissions(moderate_members=True)
-    @app_commands.command(name='warn', description="Warn members of rule-breaking behavior.")
-    async def warn(self, interaction: discord.Interaction, member: discord.Member, *, reason: str, attachment: discord.Attachment = None):
-        """
-        Warn members of rule-breaking behavior.
-            - Generates an embed/message for the offender.
-            - Generates an embed/message for response and mod-log.
-            - Adds infraction to infraction history.
-        """
+        # Unlock channel, set slowmode, and revert permissions
+        await asyncio.sleep(60)  # Wait for 60 seconds
+        await channel.edit(slowmode_delay=15)
+        await channel.set_permissions(inter.guild.default_role, send_messages=True)
+        await resp.edit(f"Warning sent to {channel.mention} and slowmode is enabled.")
 
-        await interaction.response.defer()
+    async def infraction_response(
+        self, member: Member, moderator: Member, infraction: dict
+    ):
+        match infraction["type"]:
+            # /warn
+            case "warn":
+                color = self.bot.colors.get("yellow")
+                infraction_name = "Warning"
+            # /wm (NOT /mute)
+            case "mute":
+                color = self.bot.colors.get("orange")
+                infraction_name = "Mute"
+            # /mute (NOT /wm) (shitty i know)
+            case "pseudo-mute":
+                color = self.bot.colors.get("light_orange")
+                infraction_name = "Mute"
+            case "unmute":
+                color = self.bot.colors.get("green")
+                infraction_name = "Unmute"
+            # /kick
+            case "kick":
+                color = self.bot.colors.get("dark_orange")
+                infraction_name = "Kick"
+            # /ban
+            case "ban":
+                color = self.bot.colors.get("red")
+                infraction_name = "Ban"
+            # /forceban
+            case "force-ban":
+                color = self.bot.colors.get("red")
+                infraction_name = "Force-Ban"
 
-        warn_message = discord.Embed(title='', color=yellow)
-        warn_message.add_field(name='You have been warned!', value=f'Reason: {reason}', inline=False)
-        warn_message.timestamp = datetime.datetime.now()
+        infraction_embed = (
+            Embed(
+                title="",
+                color=color,
+            )
+            .add_field(
+                name=f"Infraction: {infraction_name}",
+                value=f"Reason: {infraction['reason']}",
+                inline=False,
+            )
+            .set_footer(text=f"User ID: {member.id}")
+            .timestamp(datetime.datetime.now())
+        )
 
-        warn_log = discord.Embed(title=f"{member.name}#{member.discriminator} has been warned.", color=yellow)
-        warn_log.add_field(name=f"Reason: ", value=reason, inline=False)
-        warn_log.add_field(name=f"User ID: ", value=f"{member.id} ({member.mention})", inline=False)
-        warn_log.add_field(name=f"Responsible Moderator:", value=f"{interaction.user.name}#{interaction.user.discriminator} ({interaction.user.mention})", inline=False)
-        warn_log.timestamp = datetime.datetime.now()
+        if "duration" in infraction:
+            mute_end = int(time.time()) + infraction["duration"]
+            infraction_embed.add_field(
+                name="Unmute:",
+                value=f"<t:{mute_end}:f> (<t:{mute_end}:R>)",
+                inline=False,
+            )
 
-        warn_response = discord.Embed(title=f"", color=yellow)
-        warn_response.add_field(name=f"Member warned!", value=f"{member.mention} has been warned.", inline=False)
-        warn_response.add_field(name=f"Reason:", value=reason)
-        warn_response.timestamp = datetime.datetime.now()
+            if infraction["type"] == "mute":
+                if infraction["duration"] >= 60 * 60 * 12:
+                    change = 15
+                elif infraction["duration"] >= 60 * 60 * 6:
+                    change = 10
+                else:
+                    change = 5
+                inf_points = await self.bot.db.add_inf_points(member.id, change)
 
-        if attachment:
-            warn_message.set_image(url=attachment.proxy_url)
-            warn_log.set_image(url=attachment.proxy_url)
-            warn_response.set_image(url=attachment.proxy_url)
+                infraction_embed.add_field(
+                    name="Infraction Points:",
+                    value=f"`{inf_points}` (+{change} from previous infraction points)",
+                )
+
+        if "attachment" in infraction:
+            infraction_embed.set_image(infraction["attachment"])
 
         try:
-            await member.send(embed=warn_message)
-        except Exception:
-            warn_log.set_footer(text=f"Could not DM warn message.")
+            await member.send(infraction_embed)
+        except Forbidden:
+            infraction_embed.set_footer(text=f"User ID: {member.id} | Could not DM.")
 
-        await interaction.followup.send(embed=warn_response)
-        guild = self.bot.get_guild(self.bot.guild_id)
-        logs = discord.utils.get(guild.channels, name="logs")
-        await logs.send(embed=warn_log)
+        infraction_embed.name = (member.display_name,)
+        infraction_embed.icon_url = member.display_avatar.url
+        infraction_embed.add_field(
+            name="Responsible Moderator:",
+            value=f"{moderator.display_name} ({moderator.mention})",
+            inline=False,
+        )
 
-        member_config = await self.bot.read_user_config(member.id)
+        logs: TextChannel = await self.bot.getch_channel(
+            self.bot.config.get("logs_channel")
+        )
+        await logs.send(embed=infraction_embed)
+
+        if infraction["type"] == "pseudo-mute":
+            return
+
+        await self.bot.db.add_infraction(member.id, infraction)
+
+    @slash_command(
+        name="warn",
+        description="Warn members of rule-breaking behavior.",
+        default_member_permissions=Permissions(moderate_members=True),
+    )
+    async def warn(
+        self,
+        interaction: Interaction,
+        member: Member,
+        reason: str,
+        attachment: Attachment = None,
+    ):
+        await interaction.response.defer(ephemeral=True)
+
         warning = {
             "type": "warn",
             "reason": reason,
-            "moderator": f"{interaction.user.mention} ({interaction.user.name}#{interaction.user.discriminator})",
-            "date": datetime.datetime.now()
+            "moderator": f"{interaction.user.mention} ({interaction.user.name})",
+            "date": datetime.datetime.now(),
         }
 
         if attachment:
             warning["attachment"] = attachment.proxy_url
 
-        member_config["infractions"].append(warning)
-        await self.bot.update_user_config(member.id, member_config)
+        await self.infraction_response(
+            member=member, moderator=interaction.user, infraction=warning
+        )
 
-    @app_commands.checks.has_permissions(moderate_members=True)
-    @app_commands.command(name='wm', description='Mute and add infraction points to a member.')
-    async def wm(self, interaction: discord.Interaction, member: discord.Member, duration: str, *, reason: str, attachment: discord.Attachment = None):
-        """
-        Mute members for rule-breaking behavior.
-            - Generates embed/message for the offender.
-            - Generates an embed/message for response and mod-log.
-            - Times out offender.
-            - Adds infraction to infraction history.
-            - Adds infraction points based on duration of mute.
-            - Checks if infraction points exceed 30, and if so, notifies Chat Moderators.
-        """
+        await interaction.followup.send(
+            f"`{member.display_name} successfully warned.`", ephemeral=True
+        )
 
-        await interaction.response.defer()
+    @slash_command(
+        name="wm",
+        description="Mute and add infraction points to a member.",
+        default_member_permissions=Permissions(moderate_members=True),
+    )
+    async def wm(
+        self,
+        interaction: Interaction,
+        member: Member,
+        reason: str,
+        duration: str = SlashOption(
+            name="duration",
+            choices={
+                "3 hours (minor offense)": "3h",
+                "6 hours (moderate offense)": "6h",
+                "12 hours (repeated minor/moderate offenses)": "12h",
+                "24 hours (major / repeated moderate offense)": "24h",
+                "48 hours (major / repeated moderate offense)": "48h",
+            },
+            required=True,
+        ),
+        attachment: Attachment = None,
+    ):
+        duration: Union[str, int] = convert_time(duration)
+        time_until = datetime.timedelta(seconds=duration)
+        await member.timeout(timeout=time_until, reason=reason)
 
-        seconds = await convert(duration)
-        time_until = datetime.timedelta(seconds=seconds)
-        time_until_dt = datetime.datetime.now() + time_until
-        await member.timeout(time_until, reason=reason)
-
-        member_config = await self.bot.read_user_config(member.id)
-        if seconds >= 43200:
-            member_config["infraction_points"] += 15
-        elif seconds >= 21600:
-            member_config["infraction_points"] += 10
-        else:
-            member_config["infraction_points"] += 5
-
-        mute_message = discord.Embed(title='', color=orange)
-        mute_message.add_field(name='You have been muted!',
-                               value=f"""Reason: {reason}
-                                         Duration: {duration}
-                                         You will be unmuted {discord.utils.format_dt(time_until_dt, style='R')} at {discord.utils.format_dt(time_until_dt, style='t')}""",
-                                inline=False)
-        mute_message.add_field(name='Infraction Points:',
-                               value=f'''You currently have `{member_config["infraction_points"]} infraction points`.
-                                         Once you hit 30, you will be reviewed for a ban.''',
-                               inline=False)
-        mute_message.timestamp = datetime.datetime.now()
-
-        mute_log = discord.Embed(title=f"{member.name}#{member.discriminator} has been muted.", color=orange)
-        mute_log.add_field(name=f"Duration:", value=duration, inline=False)
-        mute_log.add_field(name=f"Infraction points:", value=f"`{member_config['infraction_points']}`", inline=False)
-        mute_log.add_field(name=f"Reason: ", value=reason, inline=False)
-        mute_log.add_field(name=f"User ID:", value=f"{member.id} ({member.mention})", inline=False)
-        mute_log.add_field(name=f"Responsible Moderator: ", value=f"{interaction.user.name}#{interaction.user.discriminator} ({interaction.user.mention})", inline=False)
-        mute_log.timestamp = datetime.datetime.now()
-
-        mute_response = discord.Embed(title=f"", color=orange)
-        mute_response.add_field(name=f"Member muted!",
-                                value=f"""{member.mention} will be unmuted {discord.utils.format_dt(time_until_dt, style='R')} at {discord.utils.format_dt(time_until_dt, style='t')}.
-                                          They currently have `{member_config['infraction_points']} infraction points`.""",
-                                inline=False)
-        mute_response.add_field(name=f"Reason:", value=reason)
-        mute_response.timestamp = datetime.datetime.now()
-
-        if attachment:
-            mute_message.set_image(url=attachment.proxy_url)
-            mute_log.set_image(url=attachment.proxy_url)
-            mute_response.set_image(url=attachment.proxy_url)
-
-        try:
-            await member.send(embed=mute_message)
-        except Exception:
-            mute_log.set_footer(text=f"Could not DM mute message.")
-
-        await interaction.followup.send(embed=mute_response)
-        guild = self.bot.get_guild(self.bot.guild_id)
-        logs = discord.utils.get(guild.channels, name="logs")
-        await logs.send(embed=mute_log)
-
-        warning = {
+        mute = {
             "type": "mute",
             "duration": duration,
             "reason": reason,
-            "moderator": f"{interaction.user.mention} ({interaction.user.name}#{interaction.user.discriminator})",
-            "date": datetime.datetime.now()
+            "moderator": f"{interaction.user.mention} ({interaction.user.name})",
+            "date": datetime.datetime.now(),
         }
-        if attachment:
-            warning["attachment"] = attachment.proxy_url
-        member_config["infractions"].append(warning)
-        await self.bot.update_user_config(member.id, member_config)
-
-        if member_config["infraction_points"] >= 30:
-            guild = self.bot.get_guild(self.bot.guild_id)
-            update = discord.utils.get(guild.channels, name="important-updates")
-            chat_mod = discord.utils.get(guild.roles, name='Chat Moderator')
-
-            ban_warn_embed = discord.Embed(title='', color=red)
-            ban_warn_embed.add_field(name='Member has reached 30 infraction points!',
-                                     value=f'{member.mention} has {member_config["infraction_points"]} infraction points and should be reviewed for a ban.')
-
-            await update.send(f"{chat_mod.mention}", embed=ban_warn_embed)
-
-    @app_commands.checks.has_permissions(moderate_members=True)
-    @app_commands.command(name='mute', description='Mute members without adding infraction points.')
-    async def mute(self, interaction: discord.Interaction, member: discord.Member, duration: str, *, reason: str, attachment: discord.Attachment = None):
-        """
-        Mutes members for any general reason.
-            - Generates an embed/message for the offender.
-            - Generates an embed/message for response and mod-log.
-            - Times out offender.
-            - NOT saved to infraction history.
-        """
-
-        await interaction.response.defer()
-
-        seconds = await convert(duration)
-        time_until = datetime.timedelta(seconds=seconds)
-        time_until_dt = time_until + datetime.datetime.now()
-        await member.timeout(time_until, reason=reason)
-
-        mute_message = discord.Embed(title='', color=light_orange)
-        mute_message.add_field(name='You have been muted!',
-                               value=f"""Reason: {reason}
-                                         Duration: {duration}
-                                         You will be unmuted {discord.utils.format_dt(time_until_dt, style='R')} at {discord.utils.format_dt(time_until_dt, style='t')}""",
-                                inline=False)
-        mute_message.timestamp = datetime.datetime.now()
-
-        mute_log = discord.Embed(title=f"{member.name}#{member.discriminator} has been muted.", color=light_orange)
-        mute_log.add_field(name=f"Duration:", value=duration, inline=False)
-        mute_log.add_field(name=f"Reason: ", value=reason, inline=False)
-        mute_log.add_field(name=f"User ID:", value=f"{member.id} ({member.mention})", inline=False)
-        mute_log.add_field(name=f"Responsible Moderator:", value=f"{interaction.user.name}#{interaction.user.discriminator} ({interaction.user.mention})", inline=False)
-        mute_log.timestamp = datetime.datetime.now()
-
-        mute_response = discord.Embed(title=f"", color=light_orange)
-        mute_response.add_field(name=f"Member muted!",
-                                value=f"{member.mention} will be unmuted {discord.utils.format_dt(time_until_dt, style='R')} at {discord.utils.format_dt(time_until_dt, style='t')}.",
-                                inline=False)
-        mute_response.add_field(name=f"Reason:", value=reason)
-        mute_response.timestamp = datetime.datetime.now()
 
         if attachment:
-            mute_message.set_image(url=attachment.proxy_url)
-            mute_log.set_image(url=attachment.proxy_url)
-            mute_response.set_image(url=attachment.proxy_url)
+            mute["attachment"] = attachment.proxy_url
 
-        try:
-            await member.send(embed=mute_message)
-        except Exception:
-            mute_log.set_footer(text=f"Could not DM mute message.")
+        await self.infraction_response(
+            member=member, moderator=interaction.user, infraction=mute
+        )
 
-        await interaction.followup.send(embed=mute_response)
-        guild = self.bot.get_guild(self.bot.guild_id)
-        logs = discord.utils.get(guild.channels, name="logs")
-        await logs.send(embed=mute_log)
+        await interaction.followup.send(
+            f"`{member.display_name} successfully muted.`", ephemeral=True
+        )
 
-    @app_commands.checks.has_permissions(moderate_members=True)
-    @app_commands.command(name='unmute', description='Unmute members (idk what else to put here).')
-    async def unmute(self, interaction: discord.Interaction, member: discord.Member, *, reason: str, attachment: discord.Attachment = None):
+    @slash_command(
+        name="mute",
+        description="Mute a member without adding infraction points.",
+        default_member_permissions=Permissions(moderate_members=True),
+    )
+    async def mute(
+        self,
+        interaction: Interaction,
+        member: Member,
+        reason: str,
+        duration: str = SlashOption(
+            name="duration", description="Mute duration. Format: 5h9m2s", required=True
+        ),
+        attachment: Attachment = None,
+    ):
+        duration: Union[str, int] = convert_time(duration)
+        time_until = datetime.timedelta(seconds=duration)
+        await member.timeout(timeout=time_until, reason=reason)
 
-        """
-        Unmute members for whatever reason.
-            - Generates an embed/message for the user.
-            - Generates an embed/message for response and mod-log.
-            - Updates infraction history by editing the most recent infraction if it's a mute.
-        """
+        mute = {
+            "type": "pseudo-mute",
+            "duration": duration,
+            "reason": reason,
+            "moderator": f"{interaction.user.mention} ({interaction.user.name})",
+            "date": datetime.datetime.now(),
+        }
 
-        await interaction.response.defer()
+        if attachment:
+            mute["attachment"] = attachment.proxy_url
 
+        await self.infraction_response(
+            member=member, moderator=interaction.user, infraction=mute
+        )
+
+        await interaction.followup.send(
+            f"`{member.display_name} successfully muted.`", ephemeral=True
+        )
+
+    @slash_command(
+        name="unmute",
+        description="Unmute a member.",
+        default_member_permissions=Permissions(moderate_members=True),
+    )
+    async def unmute(
+        self,
+        interaction: Interaction,
+        member: Member,
+        reason: str,
+        attachment: Attachment = None,
+    ):
+        await interaction.response.defer(ephemeral=True)
         await member.timeout(None, reason=reason)
 
-        unmute_message = discord.Embed(title='', color=green)
-        unmute_message.add_field(name='You have been unmuted!',
-                               value=f'Reason: {reason}',
-                               inline=False)
-        unmute_message.timestamp = datetime.datetime.now()
-
-        unmute_log = discord.Embed(title=f"{member.name}#{member.discriminator} has been unmuted.", color=green)
-        unmute_log.add_field(name=f"Reason: ", value=reason, inline=False)
-        unmute_log.add_field(name=f"User ID:", value=f"{member.id} ({member.mention})", inline=False)
-        unmute_log.add_field(name=f"Responsible Moderator: ", value=f"{interaction.user.name}#{interaction.user.discriminator} ({interaction.user.mention})", inline=False)
-        unmute_log.timestamp = datetime.datetime.now()
-
-        unmute_response = discord.Embed(title=f"", color=green)
-        unmute_response.add_field(name=f"Member unmuted!", value=f"{member.mention} has been unmuted.", inline=False)
-        unmute_response.add_field(name=f"Reason:", value=reason)
-        unmute_response.timestamp = datetime.datetime.now()
+        unmute = {
+            "type": "unmute",
+            "reason": reason,
+            "moderator": f"{interaction.user.mention} ({interaction.user.name})",
+            "date": datetime.datetime.now(),
+        }
 
         if attachment:
-            unmute_message.set_image(url=attachment.proxy_url)
-            unmute_log.set_image(url=attachment.proxy_url)
-            unmute_response.set_image(url=attachment.proxy_url)
+            unmute["attachment"] = attachment.proxy_url
 
-        try:
-            await member.send(embed=unmute_message)
-        except Exception:
-            unmute_log.set_footer(text=f"Could not DM unmute message.")
+        await self.interaction_response(
+            member=member, moderator=interaction.user, infraction=unmute
+        )
 
-        await interaction.followup.send(embed=unmute_response)
-        guild = self.bot.get_guild(self.bot.guild_id)
-        logs = discord.utils.get(guild.channels, name="logs")
-        await logs.send(embed=unmute_log)
+        await interaction.followup.send(
+            f"`{member.display_name} successfully unmuted.`", ephemeral=True
+        )
 
-        member_config = await self.bot.read_user_config(member.id)
+    @slash_command(
+        name="kick",
+        description="Kick members for rule-breaking behavior.",
+        default_member_permissions=Permissions(kick_members=True),
+    )
+    async def kick(
+        self,
+        interaction: Interaction,
+        member: Member,
+        reason: str,
+        attachment: Attachment = None,
+    ):
+        await interaction.response.defer(ephemeral=True)
 
-        try:
-            # Checks if previous infraction is a mute, and if so, the infraction will be updated.
-            if member_config['infractions'][-1]['type'] ==  "mute":
-                member_config['infractions'][-1]["unmute reason"] = reason
-                member_config['infractions'][-1]["unmute moderator"] = f"{interaction.user.mention} ({interaction.user.name}#{interaction.user.discriminator})"
-                if attachment:
-                    member_config['infractions'][-1]["unmute attachment"] = attachment.proxy_url
-                await self.bot.update_user_config(member.id, member_config)
-        except IndexError:
-            pass
-
-    @app_commands.checks.has_permissions(kick_members=True)
-    @app_commands.command(name='kick', description="Kick members (pretend something is here...).")
-    async def kick(self, interaction: discord.Interaction, member: discord.Member, *, reason: str, attachment: discord.Attachment = None):
-
-        """
-        Kick members for whatever reason.
-            - Generates an embed/messsage for the offender.
-            - Generates an embed/message for response and mod-log.
-            - Adds infraction to infraction history.
-        """
-
-        await interaction.response.defer()
-
-        kick_message = discord.Embed(title='', color=dark_orange)
-        kick_message.add_field(name='You have been kicked!', value=f'Reason: {reason}', inline=False)
-        kick_message.timestamp = datetime.datetime.now()
-
-        kick_log = discord.Embed(title=f"{member.name}#{member.discriminator} has been kicked.", color=dark_orange)
-        kick_log.add_field(name=f"Reason: ", value=reason, inline=False)
-        kick_log.add_field(name=f"User ID: ", value=f"{member.id} ({member.mention})", inline=False)
-        kick_log.add_field(name=f"Responsible Moderator: ", value=f"{interaction.user.name}#{interaction.user.discriminator} ({interaction.user.mention})", inline=False)
-        kick_log.timestamp = datetime.datetime.now()
-
-        kick_response = discord.Embed(title=f"", color=dark_orange)
-        kick_response.add_field(name=f"Member kicked!", value=f"{member.mention} has been kicked.", inline=False)
-        kick_response.add_field(name=f"Reason:", value=reason)
-        kick_response.timestamp = datetime.datetime.now()
-
-        if attachment:
-            kick_message.set_image(url=attachment.proxy_url)
-            kick_log.set_image(url=attachment.proxy_url)
-            kick_response.set_image(url=attachment.proxy_url)
-
-        try:
-            await member.send(embed=kick_message)
-        except Exception:
-            kick_log.set_footer(text=f"Could not DM kick message.")
-
-        # Kick the member AFTER the message is sent.
-        await interaction.guild.kick(member, reason=reason)
-
-        await interaction.followup.send(embed=kick_response)
-        guild = self.bot.get_guild(self.bot.guild_id)
-        logs = discord.utils.get(guild.channels, name="logs")
-        await logs.send(embed=kick_log)
-
-        member_config = await self.bot.read_user_config(member.id)
-        warning = {
+        kick = {
             "type": "kick",
             "reason": reason,
-            "moderator": f"{interaction.user.mention} ({interaction.user.name}#{interaction.user.discriminator})",
-            "date": datetime.datetime.now()
+            "moderator": f"{interaction.user.mention} ({interaction.user.name})",
+            "date": datetime.datetime.now(),
         }
-        if attachment:
-            warning["attachment"] = attachment.proxy_url
-        member_config["infractions"].append(warning)
-        await self.bot.update_user_config(member.id, member_config)
-
-    @app_commands.checks.has_permissions(ban_members=True)
-    @app_commands.command(name='ban', description="Ban members due to rule-breaking behavior.")
-    async def ban(self, interaction: discord.Interaction, member: discord.Member, *, reason: str, attachment: discord.Attachment = None):
-
-        """
-        Ban a member for rule-breaking behavior or when 30 infraction points are reached.
-            - Generates an embed/message for offender.
-            - Generates an embed/message for response and mod-log.
-            - Adds infraction to infraction history.
-        """
-
-        await interaction.response.defer()
-
-        ban_message = discord.Embed(title='', color=red)
-        ban_message.add_field(name='You have been banned!',
-                              value=f'Reason: {reason}',
-                              inline=False)
-        ban_message.add_field(name='Appeal',
-                              value='If you wish to appeal your ban, you may do so by joining the following server: https://discord.gg/RHx7deYQ3q')
-        ban_message.timestamp = datetime.datetime.now()
-
-        ban_log = discord.Embed(title=f"{member.name}#{member.discriminator} has been banned.", color=red)
-        ban_log.add_field(name=f"Reason: ", value=reason, inline=False)
-        ban_log.add_field(name=f"User ID: ", value=f"{member.id} ({member.mention})", inline=False)
-        ban_log.add_field(name=f"Responsible Moderator: ", value=f"{interaction.user.name}#{interaction.user.discriminator} ({interaction.user.mention})", inline=False)
-        ban_log.timestamp = datetime.datetime.now()
-
-        ban_response = discord.Embed(title=f"", color=red)
-        ban_response.add_field(name=f"Member banned!", value=f"{member.mention} has been banned.", inline=False)
-        ban_response.add_field(name=f"Reason:", value=reason)
-        ban_response.timestamp = datetime.datetime.now()
 
         if attachment:
-            ban_message.set_image(url=attachment.proxy_url)
-            ban_log.set_image(url=attachment.proxy_url)
-            ban_response.set_image(url=attachment.proxy_url)
+            kick["attachment"] = attachment.proxy_url
 
-        try:
-            await member.send(embed=ban_message)
-        except Exception:
-            ban_log.set_footer(text=f"Could not DM ban message.")
-        # Ban AFTER message is sent.
-        await interaction.guild.ban(member, reason=reason)
+        await self.infraction_response(
+            member=member, moderator=interaction.user, infraction=kick
+        )
 
-        await interaction.followup.send(embed=ban_response)
-        guild = self.bot.get_guild(self.bot.guild_id)
-        logs = discord.utils.get(guild.channels, name="logs")
-        await logs.send(embed=ban_log)
+        await interaction.guild.kick(member, reason=reason)
+        await interaction.followup.send(
+            f"`{member.display_name} successfully kicked.`", ephemeral=True
+        )
 
-        member_config = await self.bot.read_user_config(member.id)
-        warning = {
+    @slash_command(
+        name="ban",
+        description="Ban members for rule-breaking behavior.",
+        default_member_permissions=Permissions(ban_members=True),
+    )
+    async def ban(
+        self,
+        interaction: Interaction,
+        member: Member,
+        reason: str,
+        attachment: Attachment = None,
+    ):
+        await interaction.response.defer(ephemeral=True)
+
+        ban = {
             "type": "ban",
             "reason": reason,
-            "moderator": f"{interaction.user.mention} ({interaction.user.name}#{interaction.user.discriminator})",
-            "date": datetime.datetime.now()
+            "moderator": f"{interaction.user.mention} ({interaction.user.name})",
+            "date": datetime.datetime.now(),
         }
-        if attachment:
-            warning["attachment"] = attachment.proxy_url
-        member_config["infractions"].append(warning)
-        await self.bot.update_user_config(member.id, member_config)
-
-    @app_commands.checks.has_permissions(ban_members=True)
-    @app_commands.command(name='forceban', description="Force-ban users not present in the server.")
-    async def forceban(self, interaction: discord.Interaction, user_id: str, *, reason: str, attachment: discord.Attachment = None):
-
-        """
-        Froe-ban a user (not member) for rule-breaking behavior.
-            - Force-create an object from user id.
-            - Generates an embed/message for response and mod-log.
-            - Adds infraction to infraction history.
-        """
-
-        await interaction.response.defer()
-
-        try:
-            member_id = int(member_id)
-        except:
-            raise app_commands.AppCommandError("Please enter an integer for `member_id`.")
-        await interaction.guild.ban(discord.Object(member_id), reason=reason)
-
-        ban_log = discord.Embed(title=f"{member_id} has been force-banned.", color=red)
-        ban_log.add_field(name=f"Reason: ", value=reason, inline=False)
-        ban_log.add_field(name=f"Responsible Moderator: ",
-                          value=f"{interaction.user.name}#{interaction.user.discriminator}"
-                                f" ({interaction.user.mention})", inline=False)
-        ban_log.timestamp = datetime.datetime.now()
-
-        ban_response = discord.Embed(title=f"", color=red)
-        ban_response.add_field(name=f"Member force-banned!", value=f"{member_id} has been force-banned.",
-                                inline=False)
-        ban_response.add_field(name=f"Reason:", value=reason)
-        ban_response.timestamp = datetime.datetime.now()
 
         if attachment:
-            ban_log.set_image(url=attachment.proxy_url)
-            ban_response.set_image(url=attachment.proxy_url)
+            ban["attachment"] = attachment.proxy_url
 
-        await interaction.followup.send(embed=ban_response)
-        guild = self.bot.get_guild(self.bot.guild_id)
-        logs = discord.utils.get(guild.channels, name="logs")
-        await logs.send(embed=ban_log)
+        await self.infraction_response(
+            member=member, moderator=interaction.user, infraction=ban
+        )
 
-        member_config = await self.bot.read_user_config(member_id)
-        warning = {
-            "type": "force-ban",
-            "reason": reason,
-            "moderator": f"{interaction.user.mention} ({interaction.user.name}#{interaction.user.discriminator})",
-            "date": datetime.datetime.now()
-        }
-        if attachment:
-            warning["attachment"] = attachment.proxy_url
-        member_config["infractions"].append(warning)
-        await self.bot.update_user_config(member_id, member_config)
+        await interaction.guild.ban(member, reason=reason)
+        await interaction.followup.send(
+            f"`{member.display_name} successfully banned.`", ephemeral=True
+        )
 
-    @app_commands.checks.has_permissions(manage_messages=True)
-    async def delete(self, interaction:discord.Interaction, message: discord.Message):
-
-        """
-        Deletes a message using the bot.
-        """
-
+    @message_command(
+        name="Delete Message",
+        default_member_permissions=Permissions(manage_messages=True),
+    )
+    async def delete(self, interaction: Interaction, message: Message):
         await interaction.response.defer(ephemeral=True)
         await message.delete()
 
-        message_log = discord.Embed(title=f"", color=yellow)
-        message_log.add_field(name=f"Responsible Moderator: ",
-                              value=f"{interaction.user.name}#{interaction.user.discriminator}",
-                              inline=False)
-        message_log.add_field(name="Message Content: ", value=f"```{message.content}```", inline=False)
-        message_log.add_field(name="Message Channel: ", value=f"{message.channel.mention}", inline=False)
-        message_log.set_author(name=f"{message.author.name}#{message.author.discriminator}'s message was deleted.",
-                               url=f"{message.author.avatar.url}")
-        message_log.timestamp = datetime.datetime.now()
+        log_embed = (
+            Embed(
+                title="",
+                color=self.bot.colors.get("orange"),
+            )
+            .add_field(name="Message Content:", value=message.content, inline=False)
+            .add_field(
+                name="Message Channel:", value=message.channel.mention, inline=False
+            )
+            .add_field(
+                name="Responsible Moderator:",
+                value=f"{interaction.user.name} ({interaction.user.mention})",
+            )
+            .set_author(
+                name=message.author.name,
+                url=f"discord://-/users/{message.author.id}",
+                icon_url=message.author.avatar.url,
+            )
+            .timestamp(datetime.datetime.now())
+        )
 
         if message.attachments:
-            message_log.set_image(url=message.attachments[0].proxy_url)
+            log_embed.set_image(url=message.attachments[0].proxy_url)
 
-        guild = self.bot.get_guild(self.bot.guild_id)
-        logs = discord.utils.get(guild.channels, name="logs")
+        logs: TextChannel = await self.bot.getch_channel(
+            self.bot.config.get("logs_channel")
+        )
+        await logs.send(embed=log_embed)
 
-        await logs.send(embed=message_log)
-
-        if len(message.attachments) > 1:
-
-            attachments_count = 1
-
-            for attachment in message.attachments:
-
-                attachment_embed = discord.Embed(title="", color=blue)
-
-                try:
-                    attachment_embed.set_image(url=message.attachments[attachments_count].proxy_url)
-                    attachment_embed.set_footer(text=f"{attachments_count + 1}/{len(message.attachments)} attachments")
-                except IndexError:
-                    break
-
-                attachments_count += 1
-                await logs.send(embed=attachment_embed)
-
-        await interaction.followup.send("`Message successfully deleted!`", ephemeral=True)
+        await interaction.followup.send(
+            "`Message successfully deleted!`", ephemeral=True
+        )
 
 
-async def setup(bot: commands.Bot) -> None:
-    await bot.add_cog(ModerationCommands(bot), guilds=[discord.Object(id=bot.guild_id)])
-    bot.add_view(BanAppealButton(bot))
+async def setup(bot: APBot):
+    bot.add_cog(ModerationCommands(bot))
