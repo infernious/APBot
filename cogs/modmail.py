@@ -98,9 +98,7 @@ class Modmail(commands.Cog):
 
         await user.send(embed=send_embed)
 
-        response_embed = Embed(
-            title=f"Message sent to {user.name}", description=f"```\n{message}\n```", color=self.bot.colors["orange"]
-        )
+        response_embed = Embed(title=f"Message sent to {user.name}", description=f"```\n{message}\n```", color=self.bot.colors["orange"])
 
         if attachment:
             response_embed.set_image(url=attachment.proxy_url)
@@ -112,8 +110,7 @@ class Modmail(commands.Cog):
     async def _mm_ban(
         self,
         inter: Interaction,
-        user: User = SlashOption(name="user", description="User to ban. Defaults to current channel author.", required=False
-        )
+        user: User = SlashOption(name="user", description="User to ban. Defaults to current channel author.", required=False),
     ):
         """Bans a user from using modmail"""
         if not user and inter.channel.parent_id != self.bot.config.get("modmail_channel"):
@@ -129,8 +126,7 @@ class Modmail(commands.Cog):
     async def _mm_unban(
         self,
         inter: Interaction,
-        user: User = SlashOption(name="user", description="User to unban. Defaults to current channel author.",required=False
-        )
+        user: User = SlashOption(name="user", description="User to unban. Defaults to current channel author.", required=False),
     ):
         """Unbans a user from using modmail"""
         if not user and inter.channel.parent_id != self.bot.config.get("modmail_channel"):
