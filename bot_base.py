@@ -9,7 +9,6 @@ from config_handler import Config
 from database_handler import Database
 
 
-
 class APBot(commands.Bot):
     guild: Guild
     db: Database

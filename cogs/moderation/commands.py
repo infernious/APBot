@@ -1,5 +1,5 @@
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from nextcord import (
     slash_command,
@@ -8,7 +8,6 @@ from nextcord import (
     Interaction,
     Embed,
     Member,
-    Object,
     TextChannel,
     SlashOption,
     Attachment,
@@ -19,13 +18,16 @@ from nextcord import (
 from nextcord.ext import commands
 import asyncio
 from bot_base import APBot
-from typing import Union
+from typing import Union, Optional
 from cogs.utils import convert_time
+
+from models import Infraction
 
 
 class ModerationCommands(commands.Cog):
     def __init__(self, bot: APBot) -> None:
         self.bot = bot
+
 
     @slash_command(
         name="warnchannel",
@@ -35,101 +37,80 @@ class ModerationCommands(commands.Cog):
     async def warnchannel(
         self,
         inter: Interaction,
-        channel: TextChannel = SlashOption(
-            description="The channel to send the warning to", required=True
-        ),
-        reason: str = SlashOption(
-            description="The reason for the warning", required=True
-        ),
+        reason: str = SlashOption(description="The reason for the warning", required=False)
     ):
         """
-        Sends a warning message to a specified channel, disables @everyone's message permissions for 10 seconds,
+        Sends a warning message to a specified channel, disables @everyone's message permissions for 5 minutes,
         and then sets a 15-second slowmode in the channel.
         """
         await inter.response.defer(ephemeral=True)
-        
-        resp = await inter.send("Processing the warning...", ephemeral=True)
 
-        # Send an embed with the warning reason
-        embed = Embed(
-            title="This channel has been warned!",
-            description=f"⚠️ {reason}",
-            color=Color.red(),
+        await inter.channel.send(
+            embed=Embed(
+                title="Channel Warn",
+                description=f"⚠️ {reason}",
+                color=self.bot.colors.get("red", Color.red()),
+            ).set_footer(text="This channel will be unlocked soon. Go touch grass in the meantime.")
         )
-        embed.set_footer(text="This channel will be unlocked in 1 minute.")
-        await channel.send(embed=embed)
 
         # Temporarily change permissions
-        await channel.set_permissions(inter.guild.default_role, send_messages=False)
-        await resp.edit(f"Warning sent to {channel.mention}.")
+        await inter.channel.set_permissions(inter.guild.default_role, send_messages=False)
+        await inter.followup.send("Done", ephemeral=True)
+
+        logs_channel: TextChannel = await self.bot.getch_channel(self.bot.config.get("logs_channel"))
+        if logs_channel:
+            await logs_channel.send(embed=Embed(
+                title=f"Channel Warn",
+                description=f"Responsible Mod: {inter.author.mention}\nReason: {reason if reason else 'No Reason Given.'}",
+                color=self.bot.colors.get("light_orange")
+            ))
 
         # Unlock channel, set slowmode, and revert permissions
-        await asyncio.sleep(60)  # Wait for 60 seconds
-        await channel.edit(slowmode_delay=15)
-        await channel.set_permissions(inter.guild.default_role, send_messages=True)
-        await resp.edit(f"Warning sent to {channel.mention} and slowmode is enabled.")
+        await asyncio.sleep(60 * 5)  # Wait for 5 minutes
+        await inter.channel.edit(slowmode_delay=15)
+        await inter.channel.set_permissions(inter.guild.default_role, send_messages=True)
 
-    async def infraction_response(
-        self, member: Member, moderator: Member, infraction: dict
-    ):
-        match infraction["type"]:
-            # /warn
+    async def infraction_response(self, member: Member, infraction: Infraction) -> None:
+        match infraction.actiontype:
             case "warn":
                 color = self.bot.colors.get("yellow")
                 infraction_name = "Warning"
-            # /wm (NOT /mute)
-            case "mute":
+            case "mute": # /wm (NOT /mute)
                 color = self.bot.colors.get("orange")
                 infraction_name = "Mute"
-            # /mute (NOT /wm) (shitty i know)
-            case "pseudo-mute":
+            case "pseudo-mute": # /mute (NOT /wm)
                 color = self.bot.colors.get("light_orange")
                 infraction_name = "Mute"
             case "unmute":
                 color = self.bot.colors.get("green")
                 infraction_name = "Unmute"
-            # /kick
             case "kick":
                 color = self.bot.colors.get("dark_orange")
                 infraction_name = "Kick"
-            # /ban
             case "ban":
                 color = self.bot.colors.get("red")
                 infraction_name = "Ban"
-            # /forceban
             case "force-ban":
                 color = self.bot.colors.get("red")
                 infraction_name = "Force-Ban"
 
-        infraction_embed = (
-            Embed(
-                title="",
-                color=color,
-            )
-            .add_field(
-                name=f"Infraction: {infraction_name}",
-                value=f"Reason: {infraction['reason']}",
-                inline=False,
-            )
-            .set_footer(text=f"User ID: {member.id}")
-            .timestamp(datetime.datetime.now())
+        infraction_embed = Embed(
+            title=f"Infraction: {infraction_name}",
+            description=f"Reason: {infraction.reason}",
+            color=color,
+            timestamp=infraction.actiontime
         )
 
-        if "duration" in infraction:
-            mute_end = int(time.time()) + infraction["duration"]
+        if infraction.duration:
+            mute_end = (infraction.actiontime + timedelta(seconds=infraction.duration)).timestamp()
             infraction_embed.add_field(
                 name="Unmute:",
                 value=f"<t:{mute_end}:f> (<t:{mute_end}:R>)",
                 inline=False,
             )
 
-            if infraction["type"] == "mute":
-                if infraction["duration"] >= 60 * 60 * 12:
-                    change = 15
-                elif infraction["duration"] >= 60 * 60 * 6:
-                    change = 10
-                else:
-                    change = 5
+            if infraction.actiontype == "mute":
+                change = 15 if infraction.duration >= 60 * 60 * 12 else (10 if infraction.duration >= 60 * 60 * 6 else 5)
                 inf_points = await self.bot.db.add_inf_points(member.id, change)
 
                 infraction_embed.add_field(
@@ -137,8 +118,8 @@ class ModerationCommands(commands.Cog):
                     value=f"`{inf_points}` (+{change} from previous infraction points)",
                 )
 
-        if "attachment" in infraction:
-            infraction_embed.set_image(infraction["attachment"])
+        if infraction.attachment_url:
+            infraction_embed.set_image(infraction.attachment_url)
 
         try:
             await member.send(infraction_embed)
@@ -149,19 +130,16 @@ class ModerationCommands(commands.Cog):
         infraction_embed.icon_url = member.display_avatar.url
         infraction_embed.add_field(
             name="Responsible Moderator:",
-            value=f"{moderator.display_name} ({moderator.mention})",
+            value=f"{infraction.moderator.display_name} ({infraction.moderator.mention})",
             inline=False,
         )
 
-        logs: TextChannel = await self.bot.getch_channel(
-            self.bot.config.get("logs_channel")
-        )
+        logs: TextChannel = await self.bot.getch_channel(self.bot.config.get("logs_channel"))
         await logs.send(embed=infraction_embed)
 
-        if infraction["type"] == "pseudo-mute":
-            return
+        if infraction.actiontype != "pseudo-mute":
+            await self.bot.db.add_infraction(member.id, infraction)
 
-        await self.bot.db.add_infraction(member.id, infraction)
 
     @slash_command(
         name="warn",
@@ -170,30 +148,26 @@ class ModerationCommands(commands.Cog):
     )
     async def warn(
         self,
-        interaction: Interaction,
+        inter: Interaction,
         member: Member,
-        reason: str,
+        reason: str = SlashOption(description="Reason for warn", required=True),
         attachment: Attachment = None,
     ):
-        await interaction.response.defer(ephemeral=True)
+        await inter.response.defer(ephemeral=True)
 
-        warning = {
-            "type": "warn",
-            "reason": reason,
-            "moderator": f"{interaction.user.mention} ({interaction.user.name})",
-            "date": datetime.datetime.now(),
-        }
+        warning = Infraction(
+            actiontype="warn",
+            reason=reason,
+            moderator=inter.author,
+            actiontime=datetime.now()
+        )
 
         if attachment:
-            warning["attachment"] = attachment.proxy_url
+            warning.attachment_url = attachment.proxy_url
 
-        await self.infraction_response(
-            member=member, moderator=interaction.user, infraction=warning
-        )
+        await self.infraction_response(member=member, infraction=warning)
 
-        await interaction.followup.send(
-            f"`{member.display_name} successfully warned.`", ephemeral=True
-        )
+        await inter.followup.send(f"`{member.display_name} successfully warned.`", ephemeral=True)
 
     @slash_command(
         name="wm",
@@ -205,33 +179,21 @@ class ModerationCommands(commands.Cog):
         interaction: Interaction,
         member: Member,
         reason: str,
-        duration: str = SlashOption(
-            name="duration",
-            choices={
-                "3 hours (minor offense)": "3h",
-                "6 hours (moderate offense)": "6h",
-                "12 hours (repeated minor/moderate offenses)": "12h",
-                "24 hours (major / repeated moderate offense)": "24h",
-                "48 hours (major / repeated moderate offense)": "48h",
-            },
-            required=True,
-        ),
+        duration: str = SlashOption(name="duration", description="Mute duration. Format: 5h9m2s", required=True),
         attachment: Attachment = None,
     ):
         duration: Union[str, int] = convert_time(duration)
         time_until = datetime.timedelta(seconds=duration)
         await member.timeout(timeout=time_until, reason=reason)
 
-        mute = {
-            "type": "mute",
-            "duration": duration,
-            "reason": reason,
-            "moderator": f"{interaction.user.mention} ({interaction.user.name})",
-            "date": datetime.datetime.now(),
-        }
-
-        if attachment:
-            mute["attachment"] = attachment.proxy_url
+        mute = Infraction(
+            actiontype="mute",
+            reason=reason,
+            moderator=interaction.user,
+            actiontime=datetime.now(),
+            duration=duration,
+            attachment_url=attachment.proxy_url if attachment else None
+        )
 
         await self.infraction_response(
             member=member, moderator=interaction.user, infraction=mute
@@ -251,9 +213,7 @@ class ModerationCommands(commands.Cog):
         interaction: Interaction,
         member: Member,
         reason: str,
-        duration: str = SlashOption(
-            name="duration", description="Mute duration. Format: 5h9m2s", required=True
-        ),
+        duration: str = SlashOption(name="duration", description="Mute duration. Format: 5h9m2s", required=True),
         attachment: Attachment = None,
     ):
         duration: Union[str, int] = convert_time(duration)
