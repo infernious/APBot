@@ -31,15 +31,13 @@ cogs: List[str] = [
     # "cogs.modmail",
     # "cogs.recurrent"
     # "cogs.special",
-    "cogs.study",
-    "cogs.question",
-    "cogs.tags"
+    # "cogs.study",
+    # "cogs.tags"
 ]
 
 
 @bot.event
 async def on_ready() -> None:
-    bot.owner_ids = bot.config.get("owner_ids", [])
     print(f"Logged in as {bot.user} at {datetime.fromtimestamp(time.time()).strftime(r'%d-%b-%y, %H:%M:%S')}")
 
 
@@ -58,6 +56,9 @@ async def startup(conf: Config):
     bot.db.bot_user_id = bot.user.id
 
     await bot.resync_slash_commands()
+
+    bot.owner_ids = bot.config.get("owner_ids", [])
+
     print("All Ready")
 
 
