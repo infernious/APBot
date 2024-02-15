@@ -41,7 +41,7 @@ class TagDb:
 
         return maybe_found
 
-    async def insert_tagself, name: str, value: str, attachments: list[File] | None) -> None:
+    async def insert_tag(self, name: str, value: str, attachments: list[File] | None) -> None:
 
         if not attachments:
             attachments = []
