@@ -105,7 +105,7 @@ class Infraction(commands.Cog):
         if new_inf_points < 30:
             return
 
-        ch: Optional[TextChannel] = await self.bot.getch_channel(self.bot.config.get("ban_review_channel-id"))
+        ch: Optional[TextChannel] = await self.bot.fetch_channel(self.bot.config.get("ban_review_channel-id"))
         if not ch:
             return
 

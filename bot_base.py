@@ -17,7 +17,7 @@ class APBot(commands.Bot):
     colors: dict
     rolemenu_view_set: bool
 
-    async def getch_guild(self, guild_id: int) -> Optional[Guild]:
+    async def fetch_guild(self, guild_id: int) -> Optional[Guild]:
         """Looks up a guild in cache or fetches if not found."""
         guild: Union[Guild, None] = self.get_guild(guild_id)
         if guild:
@@ -29,9 +29,9 @@ class APBot(commands.Bot):
             return False
         return guild
 
-    async def getch_role(self, guild_id: int, role_id: int) -> Optional[Role]:
+    async def fetch_role(self, guild_id: int, role_id: int) -> Optional[Role]:
         """Looks up a guild in cache or fetches if not found."""
-        guild: Optional[Guild] = await self.getch_guild(guild_id)
+        guild: Optional[Guild] = await self.fetch_guild(guild_id)
 
         if not guild:
             return False
@@ -47,7 +47,7 @@ class APBot(commands.Bot):
                 return False
         return role
 
-    async def getch_user(self, user_id: int) -> Optional[User]:
+    async def fetch_user(self, user_id: int) -> Optional[User]:
         """Looks up a user in cache or fetches if not found."""
         user: Union[User, None] = self.get_user(user_id)
         if user:
@@ -58,10 +58,10 @@ class APBot(commands.Bot):
             return False
         return user
 
-    async def getch_member(self, guild_id: int, member_id: int) -> Optional[Member]:
+    async def fetch_member(self, guild_id: int, member_id: int) -> Optional[Member]:
         """Looks up a member in cache or fetches if not found."""
 
-        guild: Union[Member, None] = await self.getch_guild(guild_id)
+        guild: Union[Member, None] = await self.fetch_guild(guild_id)
         if not guild:
             return False
 
@@ -76,7 +76,7 @@ class APBot(commands.Bot):
 
         return member
 
-    async def getch_channel(self, channel_id: int) -> Optional[GuildChannel]:
+    async def fetch_channel(self, channel_id: int) -> Optional[GuildChannel]:
         """Looks up a channel in cache or fetches if not found."""
         channel: Union[GuildChannel, None] = self.get_channel(channel_id)
         if channel:
@@ -89,9 +89,9 @@ class APBot(commands.Bot):
 
         return channel
 
-    async def getch_message(self, channel_id: int, message_id: int) -> Optional[Message]:
+    async def fetch_message(self, channel_id: int, message_id: int) -> Optional[Message]:
         """Looks up a channel in cache or fetches if not found."""
-        channel = await self.getch_channel(channel_id)
+        channel = await self.fetch_channel(channel_id)
         if not channel:
             return None
 

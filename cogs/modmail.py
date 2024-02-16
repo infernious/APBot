@@ -46,14 +46,14 @@ class Modmail(commands.Cog):
         success = False
         if thread_id:
             try:
-                thread = await self.bot.getch_channel(thread_id)
+                thread = await self.bot.fetch_channel(thread_id)
                 await thread.send(embed=modmail_embed)
                 success = True
             except:
                 pass
 
         if not success:
-            modmail: TextChannel = await self.bot.getch_channel(self.bot.config.get("modmail_channel"))
+            modmail: TextChannel = await self.bot.fetch_channel(self.bot.config.get("modmail_channel"))
             thread: Thread = await modmail.create_thread(
                 name=f"{message.author}: {message.author.id}", embed=modmail_embed
             )
@@ -100,7 +100,7 @@ class Modmail(commands.Cog):
         if not message and not attachment:
             return await inter.send("You must specify a message or an attachment!", ephemeral=True)
 
-        user = await self.bot.getch_user(int(inter.channel.name.split(" ")[-1]))
+        user = await self.bot.fetch_user(int(inter.channel.name.split(" ")[-1]))
         send_embed = Embed(
             title="Message from the mods.",
             description=message,

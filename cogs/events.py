@@ -17,7 +17,7 @@ class EventAnnouncement(ui.View):
         Give the "Lounge: Events" role to the interaction user.
         """
 
-        role = await self.bot.getch_role(self.bot.guild.id, self.bot.config.get("events_role_id"))
+        role = await self.bot.fetch_role(self.bot.guild.id, self.bot.config.get("events_role_id"))
         if not role:
             return await inter.send("There appears to be a bug within me, please report this :)", ephemeral=True)
 
@@ -64,8 +64,8 @@ class Events(commands.Cog):
         elif not view.value:
             return await resp.edit("Cancelled.", view=None)
 
-        event_role = await self.bot.getch_role(self.bot.guild.id, self.bot.config.get("events_role_id"))
-        event_channel: Optional[TextChannel] = await self.bot.getch_channel(self.bot.config.get("events_channel_id"))
+        event_role = await self.bot.fetch_role(self.bot.guild.id, self.bot.config.get("events_role_id"))
+        event_channel: Optional[TextChannel] = await self.bot.fetch_channel(self.bot.config.get("events_channel_id"))
         if not event_channel or not event_role:
             return await resp.edit("Failed to get events role/channel.")
 

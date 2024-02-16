@@ -39,7 +39,7 @@ class Decay(commands.Cog):
             content = f"<@&{self.bot.config.get('bot_staff_role_id', 0)}>"
 
         # get decay logs channel, or else get logs channel
-        channel = await self.bot.getch_channel(self.bot.config.get("decay_logs_channel", self.bot.config.get("logs_channel")))
+        channel = await self.bot.fetch_channel(self.bot.config.get("decay_logs_channel", self.bot.config.get("logs_channel")))
         await channel.send(embed=emb, content=content)
 
     @decay.before_loop

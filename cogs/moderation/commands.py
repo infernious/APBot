@@ -153,7 +153,7 @@ class ModerationCommands(commands.Cog):
             inline=False,
         )
 
-        logs: TextChannel = await self.bot.getch_channel(
+        logs: TextChannel = await self.bot.fetch_channel(
             self.bot.config.get("logs_channel")
         )
         await logs.send(embed=infraction_embed)
@@ -410,7 +410,7 @@ class ModerationCommands(commands.Cog):
         if message.attachments:
             log_embed.set_image(url=message.attachments[0].proxy_url)
 
-        logs: TextChannel = await self.bot.getch_channel(
+        logs: TextChannel = await self.bot.fetch_channel(
             self.bot.config.get("logs_channel")
         )
         await logs.send(embed=log_embed)

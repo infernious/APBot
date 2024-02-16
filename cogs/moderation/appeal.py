@@ -8,7 +8,7 @@ from datetime import datetime
 import time
 
 async def generic_decide(bot: APBot, user_id: int, message_id: int):
-    appeal_message: Optional[Message] = await bot.getch_message(bot.config.get("appeals_channel_id"), message_id)
+    appeal_message: Optional[Message] = await bot.fetch_message(bot.config.get("appeals_channel_id"), message_id)
 
     maintain_ban_reactions = len([i for i in appeal_message.reactions if i.emoji == "🔴"])
     unban_reactions = len([i for i in appeal_message.reactions if i.emoji == "🟢"])
@@ -24,7 +24,7 @@ async def generic_decide(bot: APBot, user_id: int, message_id: int):
             decision_embed.colour = bot.colors["orange"]
             decision_embed.add_field(name="", value="Member is already unbanned!")
         try:
-            user = await bot.getch_user(user_id)
+            user = await bot.fetch_user(user_id)
             await user.send(embed=Embed(title="Ban Lifted.", description="You have been unbanned from AP Students! Welcome back :)\nJoin back using [this link!](https://discord.gg/apstudents)", color=self.bot.colors["green"]))
         except:
             pass
@@ -80,7 +80,7 @@ class BanAppealModal(ui.Modal):
     async def callback(self, inter: Interaction):
         await inter.response.defer(ephemeral=True, with_message=True)
 
-        ch = await self.bot.getch_channel(self.bot.config.get("appeals_channel_id"))
+        ch = await self.bot.fetch_channel(self.bot.config.get("appeals_channel_id"))
         now = datetime.now()
 
         emb = Embed(

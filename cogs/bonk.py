@@ -20,7 +20,7 @@ class Bonk(commands.Cog):
             return
 
         await self.bot.db.remove_reminder(user_id, reminder_id)
-        user = await self.bot.getch_user(user_id)
+        user = await self.bot.fetch_user(user_id)
 
         if not user:
             return

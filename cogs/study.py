@@ -16,8 +16,8 @@ class Study(commands.Cog):
 
     async def remove_study_role(self, user_id: int) -> None:
         try:
-            user = await self.bot.getch_member(self.bot.guild.id, user_id)
-            role = await self.bot.getch_role(self.bot.guild.id, self.bot.config.get("study_role_id"))
+            user = await self.bot.fetch_member(self.bot.guild.id, user_id)
+            role = await self.bot.fetch_role(self.bot.guild.id, self.bot.config.get("study_role_id"))
         except:
             return
 
@@ -62,7 +62,7 @@ class Study(commands.Cog):
             await resp.edit("Removing role...")
             await self.remove_study_role(inter.user.id)
 
-        await inter.user.add_roles(await self.bot.getch_role(self.bot.guild.id, study_role_id))
+        await inter.user.add_roles(await self.bot.fetch_role(self.bot.guild.id, study_role_id))
         await resp.edit("Updating database...")
 
         await self.bot.db.set_user_study_end(inter.user.id, study_end)

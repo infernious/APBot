@@ -17,7 +17,7 @@ class SpecialPerms(commands.Cog):
         if self.bot.config.get("special_perms_role_id") not in [i.id for i in inter.user.roles]:
             return await inter.send("You ain't allowed to use that command!", ephemeral=True)
 
-        role = await self.bot.getch_role(self.bot.guild.id, self.bot.config.get("esclusion_role_id"))
+        role = await self.bot.fetch_role(self.bot.guild.id, self.bot.config.get("esclusion_role_id"))
 
         await member.add_roles(role)
         return await inter.send(f"Added {role.mention} to {member.mention}", ephemeral=True)

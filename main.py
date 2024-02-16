@@ -54,7 +54,7 @@ async def startup(conf: Config):
 
     await bot.wait_until_ready()
 
-    bot.guild: Guild = await bot.getch_guild(conf.get("guild_id"))
+    bot.guild: Guild = await bot.fetch_guild(conf.get("guild_id"))
     bot.db.bot_user_id = bot.user.id
 
     await bot.resync_slash_commands()
