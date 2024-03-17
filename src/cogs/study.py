@@ -8,7 +8,6 @@ from nextcord.ext import commands
 from bot_base import APBot
 from cogs.utils import convert_time
 
-import nextcord
 
 class Study(commands.Cog):
     def __init__(self, bot: APBot) -> None:
@@ -24,7 +23,7 @@ class Study(commands.Cog):
         if not user or not role:
             return
 
-        await self.bot.db.delete_study_user(user_id)
+        await self.bot.db.study.delete_user(user_id)
         await user.remove_roles(role)
     
 
@@ -65,7 +64,7 @@ class Study(commands.Cog):
         await inter.user.add_roles(await self.bot.getch_role(self.bot.guild.id, study_role_id))
         await resp.edit("Updating database...")
 
-        await self.bot.db.set_user_study_end(inter.user.id, study_end)
+        await self.bot.db.study.set_time(inter.user.id, study_end)
 
         self.bot.loop.call_later(duration, asyncio.create_task, self.remove_study_role(inter.user.id))
         await resp.edit(
@@ -74,7 +73,7 @@ class Study(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self) -> None:
-        students = await self.bot.db.get_all_study_students()
+        students = await self.bot.db.study.get_all()
         for user_id, expires_at in students.items():
             seconds = expires_at - int(time.time())
             if seconds <= 0:
