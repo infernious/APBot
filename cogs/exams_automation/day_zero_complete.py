@@ -11,18 +11,18 @@ nonessential_textchannels = ["welcome", "general-2", "college", "bot-commands",
                              "post-ap-math", "higher-cs", "higher-other",
                              "aphome-econ", "apresearch", "apart-design"]
 
-subject_channels = [["apgov-us", "apchem", "apspanish-lit", None],
-                    ["apchinese", "apes", "appsych", None],
+subject_channels = [["apgov-us", "aparthistory", "apchem", None],
+                    ["aphug", "apmicro", "apseminar", "apstats"],
                     ["aplit", "apgov-comp", "apcsa", None],
-                    ["aphug", "apmacro", "apseminar", "apstats"],
-                    ["apeuro", "apush", "aparthistory", "apmicro"],
-                    ["apcalc-ab", "apcalc-bc", "apcsp", "apitalian"],
-                    ["aplang", "apjapanese", "apphysicsc-mech", "apphysicsc-em"],
-                    ["apspanish-lang", "apbio", None, None],
-                    ["apfrench", "apwh-modern", "apphysics1", None],
-                    ["apgerman", "apmusictheory", "aplatin", "apphysics2"]]
+                    ["apchinese", "apes", "appsych", None],
+                    ["apeuro", "apush", "apmacro", "apspanish-lit"],
+                    ["apcalc-ab", "apcalc-bc", "apitalian", "apprecalc"],
+                    ["aplang", "apafam-studies", "apphysicsc-mech", "apphysicsc-em"],
+                    ["apfrench", "apwh-modern", "apcsp", "apmusictheory"],
+                    ["apspanish-lang", "apbio", "apjapanese", None],
+                    ["apgerman", "apphysics1", "aplatin", "apphysics2"]]
 
-study_session_vc_id = [1085333845152379019, 1085333845152379020, 1085333845399851172, 1085333845399851173]
+study_session_vc_id = [1236800476369125436, 1236800497428729896, 1236800514369392650, 1236800548217425960]
 
 
 class DayZero(commands.Cog):
@@ -54,7 +54,7 @@ class DayZero(commands.Cog):
 
     @dayzero.before_loop
     async def pre_dayzero(self):
-        shutdown_date = datetime.datetime(year=2023, month=4, day=30, hour=23, minute=59, second=59)
+        shutdown_date = datetime.datetime(year=2023, month=5, day=4, hour=23, minute=59, second=59)
         await discord.utils.sleep_until(shutdown_date)
 
 
@@ -74,7 +74,7 @@ class DayOne(commands.Cog):
 
     @beginning.before_loop
     async def pre_beginning(self):
-        date = datetime.datetime(year=2023, month=5, day=self.n, hour=8, minute=0, second=0)
+        date = datetime.datetime(year=2023, month=5, day=5 + self.n, hour=8, minute=0, second=0)
         await discord.utils.sleep_until(date)
 
     @tasks.loop(seconds=1, count=1)
@@ -117,7 +117,7 @@ class DayTwo(commands.Cog):
 
     @beginning.before_loop
     async def pre_beginning(self):
-        date = datetime.datetime(year=2023, month=5, day=self.n, hour=8, minute=0, second=0)
+        date = datetime.datetime(year=2023, month=5, day=5 + self.n, hour=8, minute=0, second=0)
         await discord.utils.sleep_until(date)
 
     @tasks.loop(seconds=1, count=1)
@@ -140,7 +140,7 @@ class DayTwo(commands.Cog):
 
     @end.before_loop
     async def pre_end(self):
-        date = datetime.datetime(year=2023, month=5, day=self.n, hour=18, minute=0, second=0)
+        date = datetime.datetime(year=2023, month=5, day=5 + self.n, hour=18, minute=0, second=0)
         await discord.utils.sleep_until(date)
 
 
@@ -160,7 +160,7 @@ class DayThree(commands.Cog):
 
     @beginning.before_loop
     async def pre_beginning(self):
-        date = datetime.datetime(year=2023, month=5, day=self.n, hour=8, minute=0, second=0)
+        date = datetime.datetime(year=2023, month=5, day=5 + self.n, hour=8, minute=0, second=0)
         await discord.utils.sleep_until(date)
 
     @tasks.loop(seconds=1, count=1)
@@ -190,7 +190,7 @@ class DayThree(commands.Cog):
 
     @end.before_loop
     async def pre_end(self):
-        date = datetime.datetime(year=2023, month=5, day=self.n, hour=19, minute=0, second=0)
+        date = datetime.datetime(year=2023, month=5, day=5 + self.n, hour=19, minute=0, second=0)
         await discord.utils.sleep_until(date)
 
 
@@ -210,7 +210,7 @@ class DayFour(commands.Cog):
 
     @beginning.before_loop
     async def pre_beginning(self):
-        date = datetime.datetime(year=2023, month=5, day=self.n, hour=8, minute=0, second=0)
+        date = datetime.datetime(year=2023, month=5, day=5 + self.n, hour=8, minute=0, second=0)
         await discord.utils.sleep_until(date)
 
     @tasks.loop(seconds=1, count=1)
@@ -240,7 +240,7 @@ class DayFour(commands.Cog):
 
     @end.before_loop
     async def pre_end(self):
-        date = datetime.datetime(year=2023, month=5, day=self.n, hour=19, minute=0, second=0)
+        date = datetime.datetime(year=2023, month=5, day=5 + self.n, hour=19, minute=0, second=0)
         await discord.utils.sleep_until(date)
 
 
@@ -260,7 +260,7 @@ class DayFive(commands.Cog):
 
     @beginning.before_loop
     async def pre_beginning(self):
-        date = datetime.datetime(year=2023, month=5, day=self.n, hour=8, minute=0, second=0)
+        date = datetime.datetime(year=2023, month=5, day=5 + self.n, hour=8, minute=0, second=0)
         await discord.utils.sleep_until(date)
 
     @tasks.loop(seconds=1, count=1)
@@ -290,7 +290,7 @@ class DayFive(commands.Cog):
 
     @end.before_loop
     async def pre_end(self):
-        date = datetime.datetime(year=2023, month=5, day=self.n, hour=19, minute=0, second=0)
+        date = datetime.datetime(year=2023, month=5, day=5 + self.n, hour=19, minute=0, second=0)
         await discord.utils.sleep_until(date)
 
 
@@ -327,7 +327,7 @@ class DaySeven(commands.Cog):
 
     @end.before_loop
     async def pre_end(self):
-        date = datetime.datetime(year=2023, month=5, day=self.n, hour=18, minute=0, second=0)
+        date = datetime.datetime(year=2023, month=5, day=5 + self.n, hour=18, minute=0, second=0)
         await discord.utils.sleep_until(date)
 
 
@@ -347,7 +347,7 @@ class DayEight(commands.Cog):
 
     @beginning.before_loop
     async def pre_beginning(self):
-        date = datetime.datetime(year=2023, month=5, day=self.n, hour=8, minute=0, second=0)
+        date = datetime.datetime(year=2023, month=5, day=5 + self.n, hour=8, minute=0, second=0)
         await discord.utils.sleep_until(date)
 
     @tasks.loop(seconds=1, count=1)
@@ -377,7 +377,7 @@ class DayEight(commands.Cog):
 
     @end.before_loop
     async def pre_end(self):
-        date = datetime.datetime(year=2023, month=5, day=self.n, hour=19, minute=0, second=0)
+        date = datetime.datetime(year=2023, month=5, day=5 + self.n, hour=19, minute=0, second=0)
         await discord.utils.sleep_until(date)
 
 
@@ -397,7 +397,7 @@ class DayNine(commands.Cog):
 
     @beginning.before_loop
     async def pre_beginning(self):
-        date = datetime.datetime(year=2023, month=5, day=self.n, hour=8, minute=0, second=0)
+        date = datetime.datetime(year=2023, month=5, day=5 + self.n, hour=8, minute=0, second=0)
         await discord.utils.sleep_until(date)
 
     @tasks.loop(seconds=1, count=1)
@@ -427,7 +427,7 @@ class DayNine(commands.Cog):
 
     @end.before_loop
     async def pre_end(self):
-        date = datetime.datetime(year=2023, month=5, day=self.n, hour=19, minute=30, second=0)
+        date = datetime.datetime(year=2023, month=5, day=5 + self.n, hour=19, minute=30, second=0)
         await discord.utils.sleep_until(date)
 
 
@@ -447,7 +447,7 @@ class DayTen(commands.Cog):
 
     @beginning.before_loop
     async def pre_beginning(self):
-        date = datetime.datetime(year=2023, month=5, day=self.n, hour=8, minute=0, second=0)
+        date = datetime.datetime(year=2023, month=5, day=5 + self.n, hour=8, minute=0, second=0)
         await discord.utils.sleep_until(date)
 
     @tasks.loop(seconds=1, count=1)
@@ -477,7 +477,7 @@ class DayTen(commands.Cog):
 
     @end.before_loop
     async def pre_end(self):
-        date = datetime.datetime(year=2023, month=5, day=self.n, hour=19, minute=0, second=0)
+        date = datetime.datetime(year=2023, month=5, day=5 + self.n, hour=19, minute=0, second=0)
         await discord.utils.sleep_until(date)
 
 
@@ -497,7 +497,7 @@ class DayEleven(commands.Cog):
 
     @beginning.before_loop
     async def pre_beginning(self):
-        date = datetime.datetime(year=2023, month=5, day=self.n, hour=8, minute=0, second=0)
+        date = datetime.datetime(year=2023, month=5, day=5 + self.n, hour=8, minute=0, second=0)
         await discord.utils.sleep_until(date)
 
     @tasks.loop(seconds=1, count=1)
@@ -527,7 +527,7 @@ class DayEleven(commands.Cog):
 
     @end.before_loop
     async def pre_end(self):
-        date = datetime.datetime(year=2023, month=5, day=self.n, hour=19, minute=0, second=0)
+        date = datetime.datetime(year=2023, month=5, day=5 + self.n, hour=19, minute=0, second=0)
         await discord.utils.sleep_until(date)
 
 
@@ -547,7 +547,7 @@ class DayTwelve(commands.Cog):
 
     @beginning.before_loop
     async def pre_beginning(self):
-        date = datetime.datetime(year=2023, month=5, day=self.n, hour=8, minute=0, second=0)
+        date = datetime.datetime(year=2023, month=5, day=5 + self.n, hour=8, minute=0, second=0)
         await discord.utils.sleep_until(date)
 
     @tasks.loop(seconds=1, count=1)
@@ -580,7 +580,7 @@ class DayTwelve(commands.Cog):
 
     @end.before_loop
     async def pre_end(self):
-        date = datetime.datetime(year=2023, month=5, day=self.n, hour=19, minute=0, second=0)
+        date = datetime.datetime(year=2023, month=5, day=5 + self.n, hour=19, minute=0, second=0)
         await discord.utils.sleep_until(date)
 
 
@@ -604,7 +604,7 @@ class DayThirteen(commands.Cog):
 
     @end.before_loop
     async def pre_end(self):
-        date = datetime.datetime(year=2023, month=5, day=self.n, hour=19, minute=0, second=0)
+        date = datetime.datetime(year=2023, month=5, day=5 + self.n, hour=19, minute=0, second=0)
         await discord.utils.sleep_until(date)
 
 
@@ -628,7 +628,7 @@ class DayFourteen(commands.Cog):
 
     @end.before_loop
     async def pre_end(self):
-        date = datetime.datetime(year=2023, month=5, day=self.n, hour=19, minute=0, second=0)
+        date = datetime.datetime(year=2023, month=5, day=5 + self.n, hour=19, minute=0, second=0)
         await discord.utils.sleep_until(date)
 
 
