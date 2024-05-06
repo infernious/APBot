@@ -9,16 +9,16 @@ nonessential_textchannels = ["welcome", "general-2", "college", "bot-commands",
                              "post-ap-math", "higher-cs", "higher-other",
                              "aphome-econ", "apresearch", "apart-design"]
 
-subject_channels = [#["apgov-us", "apchem", "apspanish-lit", None],
-                    #["apchinese", "apes", "appsych", None],
-                    #["aplit", "apgov-comp", "apcsa", None],
-                    #["aphug", "apmacro", "apseminar", "apstats"],
-                    #["apeuro", "apush", "aparthistory", "apmicro"],
-                    ["apcalc-ab", "apcalc-bc", "apcsp", "apitalian"],
-                    ["aplang", "apjapanese", "apphysicsc-mech", "apphysicsc-em"],
-                    ["apspanish-lang", "apbio", None, None],
-                    ["apfrench", "apwh-modern", "apphysics1", None],
-                    ["apgerman", "apmusictheory", "aplatin", "apphysics2"]]
+subject_channels = [["apgov-us", "aparthistory", "apchem", None],
+                    ["aphug", "apmicro", "apseminar", "apstats"],
+                    ["aplit", "apgov-comp", "apcsa", None],
+                    ["apchinese", "apes", "appsych", None],
+                    ["apeuro", "apush", "apmacro", "apspanish-lit"],
+                    ["apcalc-ab", "apcalc-bc", "apitalian", "apprecalc"],
+                    ["aplang", "apafam-studies", "apphysicsc-mech", "apphysicsc-em"],
+                    ["apfrench", "apwh-modern", "apcsp", "apmusictheory"],
+                    ["apspanish-lang", "apbio", "apjapanese", None],
+                    ["apgerman", "apphysics1", "aplatin", "apphysics2"]]
 
 
 class APChannel:
@@ -97,7 +97,7 @@ class APServer:
             voice_channel = APChannel(self.guild, channel.name)
             await voice_channel.shutdown()
 
-        misc_channels = discord.utils.get(self.guild.categories, name="AP 2023 Exam Season")
+        misc_channels = discord.utils.get(self.guild.categories, name="AP 2024 Exam Season")
         for channel in misc_channels.channels:
             if not channel.name == "ap-exam-info-2023":
                 misc_channel = APChannel(self.guild, channel.name)
@@ -116,7 +116,7 @@ class APServer:
                 subject_channel = APChannel(self.guild, channel_name)
                 await subject_channel.open()
 
-        misc_channels = discord.utils.get(self.guild.categories, name="AP 2023 Exam Season")
+        misc_channels = discord.utils.get(self.guild.categories, name="AP 2024 Exam Season")
         for channel in misc_channels.channels:
             if not channel.name == "ap-exam-info-2023":
                 misc_channel = APChannel(self.guild, channel.name)
