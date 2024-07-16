@@ -1,4 +1,5 @@
 import os
+import random
 from datetime import datetime
 from typing import List, Optional, Union
 
@@ -27,6 +28,7 @@ class BaseDatabase(metaclass=SingletonMeta):
         self.bot_config = self.database["bot_config"]
         self.ban_appeals = self.database["ban_appeals"]
         self.reminders = self.database["reminders"]
+        self.recurrent = self.database["recurrent"]
         self.conf = conf
 
     async def read_user_config(self, user_id: int):
@@ -129,7 +131,8 @@ class StudyDatabase(BaseDatabase):
     async def get_all(self) -> dict[int, int]:
         """Return all users with the study role"""
 
-        return {document["user_id"]: document["study_expires_at"] async for document in self.user_config.find({"study_expires_at": {"$exists": True}})}
+        return {document["user_id"]: document["study_expires_at"]
+                async for document in self.user_config.find({"study_expires_at": {"$exists": True}})}
 
     async def delete_user(self, user_id: int):
         """Remove a studying user from the database"""
@@ -260,6 +263,31 @@ class AppealDatabase(BaseDatabase):
         return [[document["user_id"], document["submission_time"]] for document in self.ban_appeals.find({"decision": None})]
 
 
+class RecurrentDatabase(BaseDatabase):
+
+    def __init__(self, conf=None):
+        super().__init__(conf)
+
+    async def get_random_message(self, channel_id: int) -> str:
+        channel_dict = await self.recurrent.find_one({"channel_id": channel_id})
+
+        if channel_dict is None:
+            channel_dict = {"channel_id": channel_id, "messages": []}
+            await self.recurrent.insert_one(channel_dict)
+
+        messages = channel_dict["messages"]
+        return random.choice(messages)
+
+    async def add_message(self, channel_id: int, message: str) -> None:
+        channel_dict = await self.recurrent.find_one({"channel_id": channel_id})
+
+        if channel_dict is None:
+            channel_dict = {"channel_id": channel_id, "messages": []}
+            await self.recurrent.insert_one(channel_dict)
+
+        channel_dict["messages"].append(message)
+
+
 class Database:
     def __init__(self, conf: Config) -> None:
         base_db = BaseDatabase(conf)
@@ -267,3 +295,4 @@ class Database:
         self.study: StudyDatabase = StudyDatabase()
         self.bonk: BonkDatabase = BonkDatabase()
         self.appeal: AppealDatabase = AppealDatabase()
+        self.recurrent: RecurrentDatabase = RecurrentDatabase()
