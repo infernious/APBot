@@ -61,7 +61,7 @@ class ModerationCommands(commands.Cog):
         if logs_channel:
             await logs_channel.send(embed=Embed(
                 title=f"Channel Warn",
-                description=f"Responsible Mod: {inter.author.mention}\nReason: {reason if reason else 'No Reason Given.'}",
+                description=f"Responsible Mod: {inter.user.mention}\nReason: {reason if reason else 'No Reason Given.'}",
                 color=self.bot.colors.get("light_orange")
             ))
 
@@ -158,7 +158,7 @@ class ModerationCommands(commands.Cog):
         warning = Infraction(
             actiontype="warn",
             reason=reason,
-            moderator=inter.author,
+            moderator=inter.user,
             actiontime=datetime.now()
         )
 

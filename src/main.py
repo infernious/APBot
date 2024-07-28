@@ -1,16 +1,22 @@
+import os
+from dotenv import load_dotenv
 import time
 from datetime import datetime
 from typing import List
-
-from discord import Guild
-from nextcord import Activity, ActivityType, Intents
-
+from nextcord import Guild, Activity, ActivityType, Intents
 from bot_base import APBot
 from config_handler import Config
 from database_handler import Database
+load_dotenv()
+print("Current working directory:", os.getcwd())
 
-import os
-conf = Config("config.json")
+config_path = "config.json"
+if not os.path.exists(config_path):
+    raise FileNotFoundError(f"Config file not found: {config_path}")
+if os.path.getsize(config_path) == 0:
+    raise ValueError(f"Config file is empty: {config_path}")
+
+conf = Config(config_path)
 
 bot: APBot = APBot(
     command_prefix=conf.get("command_prefix", "ap:"),
@@ -21,25 +27,14 @@ bot: APBot = APBot(
 )
 
 cogs: List[str] = [
-    "jishaku",
-    # "cogs.moderation.appeal",
-    # "cogs.moderation.commands",
-    # "cogs.moderation.decay",
-    "cogs.bonk",
-    # "cogs.errorhandler",
-    # "cogs.events",
-    # "cogs.modmail",
-    # "cogs.recurrent"
-    # "cogs.special",
-    # "cogs.study",
-    # "cogs.tags"
+    "cogs.moderation.commands",  # Updated path to your ModerationCommands cog
+    "cogs.bonk",  # Ensure this is the correct path for any additional cogs
+    "cogs.recurrent" 
 ]
-
 
 @bot.event
 async def on_ready() -> None:
     print(f"Logged in as {bot.user} at {datetime.fromtimestamp(time.time()).strftime(r'%d-%b-%y, %H:%M:%S')}")
-
 
 async def startup(conf: Config):
     bot.rolemenu_view_set = False
@@ -48,19 +43,22 @@ async def startup(conf: Config):
             bot.load_extension(extension)
             print(f"Successfully loaded extension {extension}")
         except Exception as e:
-            print(f"Failed to load extension {extension}\n{type(e).__name__,}: {e}")
+            print(f"Failed to load extension {extension}\n{type(e).__name__}: {e}")
 
     await bot.wait_until_ready()
 
-    bot.guild: Guild = await bot.getch_guild(conf.get("guild_id"))
+    try:
+        bot.guild: Guild = await bot.fetch_guild(conf.get("guild_id"))
+    except Exception as e:
+        print(f"Failed to fetch guild\n{type(e).__name__}: {e}")
+
     bot.db.bot_user_id = bot.user.id
 
-    await bot.resync_slash_commands()
+    await bot.resync_slash_commands()  # Ensure this is called
 
     bot.owner_ids = bot.config.get("owner_ids", [])
 
     print("All Ready")
-
 
 default_colors = {
     "yellow": 0xFFFF00,
@@ -75,10 +73,8 @@ default_colors = {
 default_colors.update({i: int(j, 16) for i, j in conf.get("colors", {}).items()})
 bot.colors = default_colors
 
-
 bot.config = conf
 bot.db = Database(conf)
 
-
 bot.loop.create_task(startup(bot.config))
-bot.run(os.environ.get("APBOT_BOT_TOKEN"))
+bot.run(os.getenv("APBOT_BOT_TOKEN"))
