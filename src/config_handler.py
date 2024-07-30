@@ -1,22 +1,25 @@
-from typing import Union
-
 import orjson
 
-
 class Config:
-    def __init__(self, fn: str) -> None:
-        self.fn = fn
+    def __init__(self, file_path: str):
+        self.file_path = file_path
+        self.config = {}
         self.refresh()
 
     def refresh(self):
-        with open(self.fn) as f:
-            self.config: dict = orjson.loads(f.read())
+        try:
+            with open(self.file_path, "r") as f:
+                content = f.read()
+                if not content.strip():
+                    raise ValueError("Config file is empty")
+                print(f"Config file contents: {content}")  # Debug print
+                self.config = orjson.loads(content)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Config file not found: {self.file_path}")
+        except orjson.JSONDecodeError as e:
+            raise ValueError(f"Failed to decode JSON from {self.file_path}: {e}")
+        except Exception as e:
+            raise RuntimeError(f"An unexpected error occurred while reading the config file: {e}")
 
-    def update(self, key: Union[dict, str], value: Union[dict, str, int, list]) -> None:
-        self.config[key] = value
-        with open(self.fn, "w") as f:
-            f.write(orjson.dumps(self.config, option=orjson.OPT_INDENT_2).decode())
-
-    def get(self, key: Union[str, dict], default=None) -> Union[dict, str, int, list]:
-        self.refresh()
+    def get(self, key, default=None):
         return self.config.get(key, default)
