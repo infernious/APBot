@@ -1,16 +1,13 @@
 import os
-from dotenv import load_dotenv
-load_dotenv()
 import random
 from datetime import datetime
-import logging
 from typing import List, Optional, Union
-import time
+
 import motor.motor_asyncio as motor
 
 from config_handler import Config
 
-database_client = motor.AsyncIOMotorClient(os.getenv("APBOT_DATABASE_CONNECT_URL"))
+database_client = motor.AsyncIOMotorClient(os.environ.get("APBOT_DATABASE_CONNECT_URL"))
 
 
 class SingletonMeta(type):
@@ -26,7 +23,7 @@ class SingletonMeta(type):
 class BaseDatabase(metaclass=SingletonMeta):
     def __init__(self, conf=None):
         self.bot_user_id: int
-        self.database = database_client["ap-test"]
+        self.database = database_client["ap-students"]
         self.user_config = self.database["user_config"]
         self.bot_config = self.database["bot_config"]
         self.ban_appeals = self.database["ban_appeals"]
@@ -273,82 +270,22 @@ class RecurrentDatabase(BaseDatabase):
 
     async def get_random_message(self, channel_id: int) -> str:
         channel_dict = await self.recurrent.find_one({"channel_id": channel_id})
+
         if channel_dict is None:
-            channel_dict = {"channel_id": channel_id, "messages": [], "next_message_time": 0}
+            channel_dict = {"channel_id": channel_id, "messages": []}
             await self.recurrent.insert_one(channel_dict)
+
         messages = channel_dict["messages"]
-        return random.choice(messages) if messages else None
+        return random.choice(messages)
 
     async def add_message(self, channel_id: int, message: str) -> None:
         channel_dict = await self.recurrent.find_one({"channel_id": channel_id})
+
         if channel_dict is None:
-            channel_dict = {"channel_id": channel_id, "messages": [], "next_message_time": 0}
+            channel_dict = {"channel_id": channel_id, "messages": []}
             await self.recurrent.insert_one(channel_dict)
+
         channel_dict["messages"].append(message)
-        await self.recurrent.update_one({"channel_id": channel_id}, {"$set": {"messages": channel_dict["messages"]}})
-
-    async def update_next_message_time(self, channel_id: int, next_time: float) -> None:
-        await self.recurrent.update_one({"channel_id": channel_id}, {"$set": {"next_message_time": next_time}})
-
-    async def get_next_message_time(self, channel_id: int) -> float:
-        channel_dict = await self.recurrent.find_one({"channel_id": channel_id})
-        if channel_dict is None:
-            channel_dict = {"channel_id": channel_id, "messages": [], "next_message_time": 0}
-            await self.recurrent.insert_one(channel_dict)
-            return 0
-        return channel_dict.get("next_message_time", 0)
-
-    async def get_all_channels(self) -> list[int]:
-        channels_cursor = self.recurrent.find({})
-        channels = await channels_cursor.to_list(length=None)  # Convert cursor to list
-        return [channel["channel_id"] for channel in channels]
-
-    async def clear_all_data(self) -> None:
-
-        await self.recurrent.delete_many({})
-
-    async def get_messages(self, channel_id: int) -> list[str]:
-
-        channel_dict = await self.recurrent.find_one({"channel_id": channel_id})
-        if channel_dict is None:
-            return []
-        return channel_dict["messages"]
-
-    async def remove_message(self, channel_id: int, index: int) -> None:
-
-        channel_dict = await self.recurrent.find_one({"channel_id": channel_id})
-        if channel_dict and 0 <= index < len(channel_dict["messages"]):
-            channel_dict["messages"].pop(index)
-            await self.recurrent.update_one({"channel_id": channel_id}, {"$set": {"messages": channel_dict["messages"]}})
-
-    async def create_category(self, category_name: str, channel_ids: list[int]) -> None:
-
-        category_dict = {"category_name": category_name, "channel_ids": channel_ids}
-        await self.recurrent.insert_one(category_dict)
-
-    async def get_category_channels(self, category_name: str) -> list[int]:
-
-        category_dict = await self.recurrent.find_one({"category_name": category_name})
-        if category_dict is None:
-            return []
-        return category_dict["channel_ids"]
-
-    async def add_channel_to_category(self, category_name: str, channel_id: int) -> None:
-
-        category_dict = await self.recurrent.find_one({"category_name": category_name})
-        if category_dict:
-            category_dict["channel_ids"].append(channel_id)
-            await self.recurrent.update_one({"category_name": category_name}, {"$set": {"channel_ids": category_dict["channel_ids"]}})
-
-    async def remove_channel_from_category(self, category_name: str, channel_id: int) -> None:
-
-        category_dict = await self.recurrent.find_one({"category_name": category_name})
-        if category_dict and channel_id in category_dict["channel_ids"]:
-            category_dict["channel_ids"].remove(channel_id)
-            await self.recurrent.update_one({"category_name": category_name}, {"$set": {"channel_ids": category_dict["channel_ids"]}})
-
-
-
 
 
 class Database:
