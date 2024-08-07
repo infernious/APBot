@@ -271,14 +271,6 @@ class RecurrentDatabase(BaseDatabase):
     def __init__(self, conf=None):
         super().__init__(conf)
 
-    async def get_random_message(self, channel_id: int) -> str:
-        channel_dict = await self.recurrent.find_one({"channel_id": channel_id})
-        if channel_dict is None:
-            channel_dict = {"channel_id": channel_id, "messages": [], "message_counts": {}, "limit": 0}
-            await self.recurrent.insert_one(channel_dict)
-        messages = channel_dict["messages"]
-        return random.choice(messages) if messages else None
-
     async def add_message(self, channel_id: int, message: str, limit: int) -> None:
         channel_dict = await self.recurrent.find_one({"channel_id": channel_id})
         if channel_dict is None:
@@ -290,13 +282,6 @@ class RecurrentDatabase(BaseDatabase):
                 channel_dict["message_counts"][message] = 0
             channel_dict["limit"] = limit
             await self.recurrent.update_one({"channel_id": channel_id}, {"$set": {"messages": channel_dict["messages"], "message_counts": channel_dict["message_counts"], "limit": limit}})
-
-    async def update_next_message_time(self, channel_id: int, next_time: float) -> None:
-        await self.recurrent.update_one({"channel_id": channel_id}, {"$set": {"next_message_time": next_time}})
-
-    async def get_next_message_time(self, channel_id: int) -> float:
-        channel_dict = await self.recurrent.find_one({"channel_id": channel_id})
-        return channel_dict["next_message_time"] if channel_dict and "next_message_time" in channel_dict else 0.0
 
     async def get_messages(self, channel_id: int) -> list:
         channel_dict = await self.recurrent.find_one({"channel_id": channel_id})
