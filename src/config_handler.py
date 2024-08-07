@@ -8,7 +8,7 @@ class Config:
 
     def refresh(self):
         try:
-            with open(self.file_path, "r", encoding='utf-8') as f:
+            with open(self.file_path, "r") as f:
                 content = f.read()
                 if not content.strip():
                     raise ValueError("Config file is empty")
