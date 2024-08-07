@@ -270,7 +270,6 @@ class RecurrentDatabase(BaseDatabase):
 
     def __init__(self, conf=None):
         super().__init__(conf)
-
     async def add_message(self, channel_id: int, message: str, limit: int) -> None:
         channel_dict = await self.recurrent.find_one({"channel_id": channel_id})
         if channel_dict is None:
@@ -286,6 +285,9 @@ class RecurrentDatabase(BaseDatabase):
     async def get_messages(self, channel_id: int) -> list:
         channel_dict = await self.recurrent.find_one({"channel_id": channel_id})
         return channel_dict["messages"] if channel_dict else []
+
+    async def clear_all_data(self) -> None:
+        await self.recurrent.delete_many({})
 
     async def get_channel_config(self, channel_id: int) -> dict:
         channel_dict = await self.recurrent.find_one({"channel_id": channel_id})
@@ -313,6 +315,9 @@ class RecurrentDatabase(BaseDatabase):
     async def get_group(self, name: str) -> list:
         group_dict = await self.recurrent.find_one({"group_name": name})
         return group_dict["channel_ids"] if group_dict else []
+
+    async def delete_group(self, name: str) -> None:
+        await self.recurrent.delete_one({"group_name": name})
 
     async def clear_channel_messages(self, channel_id: int) -> None:
         await self.recurrent.update_one({"channel_id": channel_id}, {"$set": {"messages": [], "message_counts": {}}})

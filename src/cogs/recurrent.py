@@ -7,11 +7,11 @@ class Recurrent(commands.Cog):
     def __init__(self, bot: APBot):
         self.bot = bot
         self.message_count_cache = defaultdict(int)
-        self.activity_threshold = 10  
+        self.activity_threshold = 100  
 
     @slash_command(name="recurrent", description="Manage recurring messages")
     async def _recurrent(self, inter: Interaction):
-        await inter.response.send_message("Subcommands: /recurrent add, /recurrent clear, /recurrent list, /recurrent remove, /recurrent status, /recurrent group, /recurrent showgroups", ephemeral=True)
+        await inter.response.send_message("Subcommands: /recurrent add, /recurrent clear, /recurrent list, /recurrent remove, /recurrent status, /recurrent group, /recurrent showgroups, /recurrent groupmessage, /recurrent removegroup", ephemeral=True)
 
     @_recurrent.subcommand(name="add", description="Add a recurring message to a channel")
     async def add(self, inter: Interaction, channel_id: str = SlashOption(description="ID of the channel where the message will be sent", required=True), message: str = SlashOption(description="Message to send", required=True), limit: int = SlashOption(description="Message count limit before sending a recurring message", required=True)):
