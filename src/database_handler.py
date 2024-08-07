@@ -274,54 +274,63 @@ class RecurrentDatabase(BaseDatabase):
     async def get_random_message(self, channel_id: int) -> str:
         channel_dict = await self.recurrent.find_one({"channel_id": channel_id})
         if channel_dict is None:
-            channel_dict = {"channel_id": channel_id, "messages": [], "next_message_time": 0}
+            channel_dict = {"channel_id": channel_id, "messages": [], "message_counts": {}, "limit": 0}
             await self.recurrent.insert_one(channel_dict)
         messages = channel_dict["messages"]
         return random.choice(messages) if messages else None
 
-    async def add_message(self, channel_id: int, message: str) -> None:
+    async def add_message(self, channel_id: int, message: str, limit: int) -> None:
         channel_dict = await self.recurrent.find_one({"channel_id": channel_id})
         if channel_dict is None:
-            channel_dict = {"channel_id": channel_id, "messages": [], "next_message_time": 0}
+            channel_dict = {"channel_id": channel_id, "messages": [message], "message_counts": {message: 0}, "limit": limit}
             await self.recurrent.insert_one(channel_dict)
-        channel_dict["messages"].append(message)
-        await self.recurrent.update_one({"channel_id": channel_id}, {"$set": {"messages": channel_dict["messages"]}})
+        else:
+            if message not in channel_dict["messages"]:
+                channel_dict["messages"].append(message)
+                channel_dict["message_counts"][message] = 0
+            channel_dict["limit"] = limit
+            await self.recurrent.update_one({"channel_id": channel_id}, {"$set": {"messages": channel_dict["messages"], "message_counts": channel_dict["message_counts"], "limit": limit}})
 
     async def update_next_message_time(self, channel_id: int, next_time: float) -> None:
         await self.recurrent.update_one({"channel_id": channel_id}, {"$set": {"next_message_time": next_time}})
 
     async def get_next_message_time(self, channel_id: int) -> float:
         channel_dict = await self.recurrent.find_one({"channel_id": channel_id})
-        if channel_dict is None:
-            channel_dict = {"channel_id": channel_id, "messages": [], "next_message_time": 0}
-            await self.recurrent.insert_one(channel_dict)
-            return 0
-        return channel_dict.get("next_message_time", 0)
+        return channel_dict["next_message_time"] if channel_dict and "next_message_time" in channel_dict else 0.0
 
-    async def get_all_channels(self) -> list[int]:
-        channels_cursor = self.recurrent.find({})
-        channels = await channels_cursor.to_list(length=None) 
-        return [channel["channel_id"] for channel in channels]
-
-    async def clear_all_data(self) -> None:
-
-        await self.recurrent.delete_many({})
-
-    async def get_messages(self, channel_id: int) -> list[str]:
-
+    async def get_messages(self, channel_id: int) -> list:
         channel_dict = await self.recurrent.find_one({"channel_id": channel_id})
-        if channel_dict is None:
-            return []
-        return channel_dict["messages"]
+        return channel_dict["messages"] if channel_dict else []
 
-    async def remove_message(self, channel_id: int, index: int) -> None:
-
+    async def get_channel_config(self, channel_id: int) -> dict:
         channel_dict = await self.recurrent.find_one({"channel_id": channel_id})
-        if channel_dict and 0 <= index < len(channel_dict["messages"]):
-            channel_dict["messages"].pop(index)
-            await self.recurrent.update_one({"channel_id": channel_id}, {"$set": {"messages": channel_dict["messages"]}})
+        return channel_dict if channel_dict else {"messages": [], "message_counts": {}, "limit": 0}
 
+    async def remove_message(self, channel_id: int, message: str) -> None:
+        await self.recurrent.update_one({"channel_id": channel_id}, {"$pull": {"messages": message}, "$unset": {f"message_counts.{message}": ""}})
 
+    async def update_message_count(self, channel_id: int, message: str, count: int) -> None:
+        await self.recurrent.update_one({"channel_id": channel_id}, {"$set": {f"message_counts.{message}": count}})
+
+    async def add_group(self, name: str, channel_ids: list) -> None:
+        group_dict = await self.recurrent.find_one({"group_name": name})
+        if group_dict is None:
+            group_dict = {"group_name": name, "channel_ids": channel_ids}
+            await self.recurrent.insert_one(group_dict)
+        else:
+            group_dict["channel_ids"].extend(channel_ids)
+            await self.recurrent.update_one({"group_name": name}, {"$set": {"channel_ids": list(set(group_dict["channel_ids"]))}})
+
+    async def get_groups(self) -> dict:
+        groups = await self.recurrent.find({"group_name": {"$exists": True}}).to_list(length=None)
+        return {group["group_name"]: group["channel_ids"] for group in groups}
+
+    async def get_group(self, name: str) -> list:
+        group_dict = await self.recurrent.find_one({"group_name": name})
+        return group_dict["channel_ids"] if group_dict else []
+
+    async def clear_channel_messages(self, channel_id: int) -> None:
+        await self.recurrent.update_one({"channel_id": channel_id}, {"$set": {"messages": [], "message_counts": {}}})
 
 
 class Database:
