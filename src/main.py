@@ -7,6 +7,7 @@ from nextcord import Guild, Activity, ActivityType, Intents
 from bot_base import APBot
 from config_handler import Config
 from database_handler import Database
+import logging
 load_dotenv()
 print("Current working directory:", os.getcwd())
 
@@ -15,6 +16,8 @@ if not os.path.exists(config_path):
     raise FileNotFoundError(f"Config file not found: {config_path}")
 if os.path.getsize(config_path) == 0:
     raise ValueError(f"Config file is empty: {config_path}")
+
+logging.basicConfig(level=logging.DEBUG)
 
 conf = Config(config_path)
 

@@ -7,7 +7,7 @@ import logging
 from typing import List, Optional, Union
 import time
 import motor.motor_asyncio as motor
-
+import sqlite3
 from config_handler import Config
 
 database_client = motor.AsyncIOMotorClient(os.getenv("APBOT_DATABASE_CONNECT_URL"))
@@ -270,6 +270,7 @@ class RecurrentDatabase(BaseDatabase):
 
     def __init__(self, conf=None):
         super().__init__(conf)
+    
     async def add_message(self, channel_id: int, message: str, limit: int) -> None:
         channel_dict = await self.recurrent.find_one({"channel_id": channel_id})
         if channel_dict is None:
@@ -299,6 +300,32 @@ class RecurrentDatabase(BaseDatabase):
     async def update_message_count(self, channel_id: int, message: str, count: int) -> None:
         await self.recurrent.update_one({"channel_id": channel_id}, {"$set": {f"message_counts.{message}": count}})
 
+    async def get_channel_config(self, channel_id: int) -> dict:
+        channel_dict = await self.recurrent.find_one({"channel_id": channel_id})
+        logging.debug(f"Retrieved channel config: {channel_dict}")
+        return channel_dict if channel_dict else {"messages": [], "message_counts": {}, "limit": 0}
+
+    async def add_category_message(self, category_id: int, message: str, limit: int) -> None:
+        category_dict = await self.recurrent.find_one({"category_id": category_id})
+        if category_dict is None:
+            category_dict = {"category_id": category_id, "messages": [message], "message_counts": {message: 0}, "limit": limit}
+            await self.recurrent.insert_one(category_dict)
+        else:
+            if message not in category_dict["messages"]:
+                category_dict["messages"].append(message)
+                category_dict["message_counts"][message] = 0
+            category_dict["limit"] = limit
+            await self.recurrent.update_one({"category_id": category_id}, {"$set": {"messages": category_dict["messages"], "message_counts": category_dict["message_counts"], "limit": limit}})
+
+    async def get_category_config(self, category_id: int) -> dict:
+        category_dict = await self.recurrent.find_one({"category_id": category_id})
+        return category_dict if category_dict else {"messages": [], "message_counts": {}, "limit": 0}
+
+    async def remove_category_message(self, category_id: int, message: str) -> None:
+        await self.recurrent.update_one({"category_id": category_id}, {"$pull": {"messages": message}, "$unset": {f"message_counts.{message}": ""}})
+    async def clear_channel_data(self, channel_id: int) -> None:
+        await self.recurrent.delete_one({"channel_id": channel_id})
+"""
     async def add_group(self, name: str, channel_ids: list) -> None:
         group_dict = await self.recurrent.find_one({"group_name": name})
         if group_dict is None:
@@ -322,7 +349,7 @@ class RecurrentDatabase(BaseDatabase):
     async def clear_channel_messages(self, channel_id: int) -> None:
         await self.recurrent.update_one({"channel_id": channel_id}, {"$set": {"messages": [], "message_counts": {}}})
 
-
+"""
 class Database:
     def __init__(self, conf: Config) -> None:
         base_db = BaseDatabase(conf)
