@@ -29,6 +29,13 @@ bot: APBot = APBot(
 cogs: List[str] = [
     "cogs.moderation.commands",  # Updated path to your ModerationCommands cog
     "cogs.bonk",  # Ensure this is the correct path for any additional cogs
+
+    # MG8mer changes below
+
+    "cogs.study" # MG8mer fix #1: the /study command doesn't showup as the cog was never loaded; load the cog for the command to actually show.
+
+    # MG8mer changes above
+
     "cogs.recurrent" 
 ]
 

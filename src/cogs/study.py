@@ -15,8 +15,8 @@ class Study(commands.Cog):
 
     async def remove_study_role(self, user_id: int) -> None:
         try:
-            user = await self.bot.getch_member(self.bot.guild.id, user_id)
-            role = await self.bot.getch_role(self.bot.guild.id, self.bot.config.get("study_role_id"))
+            user = await self.bot.fetch_member(self.bot.guild.id, user_id) # MG8mer fix #2: Change getch --> fetch; fetch seems to be the most logical fix at face value as getch may not make sense.
+            role = await self.bot.fetch_role(self.bot.guild.id, self.bot.config.get("study_role_id")) # MG8mer fix #3: Change getch --> fetch; fetch seems to be the most logical fix at face value as getch may not make sense.
         except:
             return
 
@@ -61,7 +61,7 @@ class Study(commands.Cog):
             await resp.edit("Removing role...")
             await self.remove_study_role(inter.user.id)
 
-        await inter.user.add_roles(await self.bot.getch_role(self.bot.guild.id, study_role_id))
+        await inter.user.add_roles(await self.bot.fetch_role(self.bot.guild.id, study_role_id)) # MG8mer fix #4: Change getch --> fetch; fetch seems to be the most logical fix at face value as getch may not make sense.
         await resp.edit("Updating database...")
 
         await self.bot.db.study.set_time(inter.user.id, study_end)
