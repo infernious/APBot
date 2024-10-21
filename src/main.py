@@ -29,6 +29,7 @@ bot: APBot = APBot(
 cogs: List[str] = [
     "cogs.moderation.commands",  # Updated path to your ModerationCommands cog
     "cogs.bonk",  # Ensure this is the correct path for any additional cogs
+    "cogs.study" 
     "cogs.recurrent" 
 ]
 

@@ -1,5 +1,6 @@
 import asyncio
 import time
+import nextcord
 from typing import Union
 
 from nextcord import Interaction, SlashOption, slash_command
@@ -70,7 +71,60 @@ class Study(commands.Cog):
         await resp.edit(
             f"The study role will be removed <t:{study_end}:R> at <t:{study_end}:f>."
         )
+    
+    class ConfirmDeny(nextcord.ui.View):
+        def __init__(self) -> None:
+            super().__init__(timeout=30)
+            self.value = None
 
+        @nextcord.ui.button(label = 'Yes', style=nextcord.ButtonStyle.green)
+        async def remove_role(self):
+            self.value = True
+            self.stop()
+
+        @nextcord.ui.button(label = 'No', style=nextcord.ButtonStyle.red)
+        async def dont_remove_role(self):
+            self.value = False
+            self.stop()
+
+    @slash_command(name="remove_study_role", description="Allow yourself to view channels once again (remove study role).")
+    async def remove_study(
+        self,
+        inter: Interaction
+    ):
+        """
+        Allow member to remove their study role (if they have it) if they are done with their studying.
+            - Checks first if study role is at all present.
+                - If present, proceed:
+                    - Asks user to confirm the removal of the study role.
+                    - If yes:
+                        - Removes study role from member.
+                        - Remove member's entry from database.
+                        - Allows them to access all channels once again.
+                    - If no, does nothing.
+                    - If button view times out, does nothing as well.
+                - If not, do nothing.
+        """
+
+        await inter.response.defer(ephemeral=True)
+        
+        study_role = await self.get_role_by_name("Study")
+
+        if study_role not in [i for i in inter.user.roles]:
+            return await inter.followup.send("You do not have a study role to remove!")
+
+        view = self.ConfirmDeny()
+
+        resp = await inter.send("Are you sure you want to remove your study role early?", ephemeral=True, view=view)
+
+        await view.wait()
+
+        if view.value:
+            await resp.edit("Removing role...")
+            await self.remove_study_role(inter.user.id)
+            return await resp.edit("Successfully removed role! You now have access to channels again.")
+        return await resp.edit("Request cancelled.")
+    
     @commands.Cog.listener()
     async def on_ready(self) -> None:
         students = await self.bot.db.study.get_all()
