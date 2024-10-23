@@ -78,12 +78,12 @@ class Study(commands.Cog):
             self.value = None
 
         @nextcord.ui.button(label = 'Yes', style=nextcord.ButtonStyle.green)
-        async def remove_role(self):
+        async def remove_role(self, button: nextcord.ui.Button, inter: nextcord.Interaction):
             self.value = True
             self.stop()
 
         @nextcord.ui.button(label = 'No', style=nextcord.ButtonStyle.red)
-        async def dont_remove_role(self):
+        async def dont_remove_role(self, button: nextcord.ui.Button, inter: nextcord.Interaction):
             self.value = False
             self.stop()
 
@@ -108,9 +108,9 @@ class Study(commands.Cog):
 
         await inter.response.defer(ephemeral=True)
         
-        study_role = await self.get_role_by_name("Study")
+        study_role_id = self.bot.config.get("study_role_id")
 
-        if study_role not in [i for i in inter.user.roles]:
+        if study_role_id not in [i.id for i in inter.user.roles]:
             return await inter.followup.send("You do not have a study role to remove!")
 
         view = self.ConfirmDeny()
@@ -120,10 +120,10 @@ class Study(commands.Cog):
         await view.wait()
 
         if view.value:
-            await resp.edit("Removing role...")
+            await resp.edit("Removing role...", view=None)
             await self.remove_study_role(inter.user.id)
-            return await resp.edit("Successfully removed role! You now have access to channels again.")
-        return await resp.edit("Request cancelled.")
+            return await resp.edit("Successfully removed role! You now have access to channels again.", view=None)
+        return await resp.edit("Request cancelled.", view=None)
     
     @commands.Cog.listener()
     async def on_ready(self) -> None:

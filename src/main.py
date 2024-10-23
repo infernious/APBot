@@ -10,7 +10,7 @@ from database_handler import Database
 load_dotenv()
 print("Current working directory:", os.getcwd())
 
-config_path = "config.json"
+config_path = "src/config.json"
 if not os.path.exists(config_path):
     raise FileNotFoundError(f"Config file not found: {config_path}")
 if os.path.getsize(config_path) == 0:
@@ -29,7 +29,7 @@ bot: APBot = APBot(
 cogs: List[str] = [
     "cogs.moderation.commands",  # Updated path to your ModerationCommands cog
     "cogs.bonk",  # Ensure this is the correct path for any additional cogs
-    "cogs.study" 
+    "cogs.study", 
     "cogs.recurrent" 
 ]
 
