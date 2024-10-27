@@ -9,7 +9,6 @@ from nextcord.ext import commands
 from bot_base import APBot
 from cogs.utils import convert_time
 
-
 class Study(commands.Cog):
     def __init__(self, bot: APBot) -> None:
         self.bot = bot
@@ -17,7 +16,10 @@ class Study(commands.Cog):
     async def remove_study_role(self, user_id: int) -> None:
         try:
             user = await self.bot.getch_member(self.bot.guild.id, user_id)
-            role = await self.bot.getch_role(self.bot.guild.id, self.bot.config.get("study_role_id"))
+            for role in self.bot.guild.roles:
+                if role.name == "Study":
+                    study_role_id = role.id
+            role = await self.bot.getch_role(self.bot.guild.id, study_role_id)
         except:
             return
 
@@ -56,7 +58,9 @@ class Study(commands.Cog):
         await resp.edit("Performing actions...")
         study_end = int(time.time()) + duration
 
-        study_role_id = self.bot.config.get("study_role_id")
+        for role in inter.guild.roles:
+            if role.name == "Study":
+                study_role_id = role.id
 
         if study_role_id in [i.id for i in inter.user.roles]:
             await resp.edit("Removing role...")
@@ -107,8 +111,10 @@ class Study(commands.Cog):
         """
 
         await inter.response.defer(ephemeral=True)
-        
-        study_role_id = self.bot.config.get("study_role_id")
+
+        for role in inter.guild.roles:
+            if role.name == "Study":
+                study_role_id = role.id
 
         if study_role_id not in [i.id for i in inter.user.roles]:
             return await inter.followup.send("You do not have a study role to remove!")

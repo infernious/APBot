@@ -7,6 +7,7 @@ from nextcord import Guild, Activity, ActivityType, Intents
 from bot_base import APBot
 from config_handler import Config
 from database_handler import Database
+
 load_dotenv()
 print("Current working directory:", os.getcwd())
 
