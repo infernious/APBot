@@ -5,13 +5,125 @@ from typing import Union
 
 from nextcord import Interaction, SlashOption, slash_command
 from nextcord.ext import commands
+from nextcord.ui import Button
 
 from bot_base import APBot
 from cogs.utils import convert_time
 
+blue = 0x00ffff
+
+class QuestionConfirm(nextcord.ui.View):
+
+    def __init__(self, bot, message, inter):
+        super().__init__(timeout=None)
+        self.bot = bot
+        self.message = message
+        self.inter = inter
+
+    @nextcord.ui.button(label='Confirm!', style=nextcord.ButtonStyle.green)
+    async def callback(self, button: Button, interaction):
+
+        """
+        Confirm mention after command is used as to avoid accidental pings.
+        Additionally ensures that the person who presses the button isn't some random goober who isn't the original person that used the command.
+        """
+
+        if interaction.user.id != self.inter.user.id:
+            await interaction.response.send_message("You're not the one who asked the question!", ephemeral=True)
+            return
+
+        for role in [i for i in self.inter.guild.roles if i in self.inter.channel.overwrites]:
+            if "Helper" in role.name:
+                await self.message.reply(f"{role.mention}, a question has been asked!")
+
+        button.style = nextcord.ButtonStyle.green
+        button.emoji = '✅'
+        button.label = "Helpers pinged!"
+        button.disabled = True
+
+        await interaction.response.edit_message(view=self)
+
+        self.stop()
+
+    async def on_timeout(self) -> None:
+
+        self.callback.style = nextcord.ButtonStyle.grey
+        self.callback.label = "Timed out!"
+        self.callback.disabled = True
+
+        await self.message.edit(view=self)
+
 class Study(commands.Cog):
     def __init__(self, bot: APBot) -> None:
         self.bot = bot
+        self.cooldowns = {}
+
+    @slash_command(name='question', description='Ask a question in a subject channel.')
+    async def question(self, interaction: nextcord.Interaction, question: str, attachment: nextcord.Attachment = None):
+        
+
+        """
+        Ping helpers in a subject channel after 10 minutes the command is used.
+            - Checks if question is in subject channel.
+            - Checks if question is "good" if its length is more than 5 words (to avoid users from just saying "help", "above", "^" or something along those lines.
+            - Waits 10 minutes for question to be answered.
+            - Prompts user after 10 minutes to confirm pinging helpers in the event that they have not been helped yet. 
+            - Uses QuestionConfirm().
+        """
+
+        user_id = interaction.user.id
+        current_time = time.time()
+        cooldown_duration = 60.0 # Set command cooldown as 60 seconds  
+        if user_id in self.cooldowns:
+            elapsed_time = current_time - self.cooldowns[user_id]
+            if elapsed_time < cooldown_duration:
+                await interaction.response.send_message(
+                    f"Command on cooldown. Try again in {round(cooldown_duration - elapsed_time, 2)} seconds.",
+                    ephemeral=True
+                )
+                return
+
+        self.cooldowns[user_id] = current_time
+
+        subject_channels = nextcord.utils.get(interaction.guild.categories, name="Subject Channels")
+
+        if interaction.channel.category != subject_channels:
+            raise commands.CommandError("Please ask a question in the subject channels.")
+
+        if len(question.split()) <= 5:
+            raise commands.CommandError("Please restate your question to have more than 5 words."
+                                               " Don't ask to ask, just post your question! "
+                                               "Be sure to include what you've tried as well.\n \n"
+                                               "Example: /question What is the powerhouse of the cell? \n \n"
+                                               "You can also post an image with your question if need be.")
+
+        question_embed = nextcord.Embed(title="", color=blue)
+        question_embed.add_field(name="Question:", value=f"```{question}```")
+
+        if attachment:
+            question_embed.set_image(url=attachment.proxy_url)
+
+        skibidi_time = int(time.time()) + 600
+        await interaction.response.send_message(f"{interaction.user.mention} has asked a question! "
+                                                f"You are able to ping helpers after <t:{skibidi_time}:R> "
+                                                f"*if you have not been helped*.",
+                                                embed=question_embed,
+                                                delete_after=600)
+
+        def check(m):
+            return m.author.id == self.bot.application_id
+
+        await self.bot.wait_for('message_delete', check=check)
+
+        question_embed.add_field(name="Ping Helpers!",
+                                 value="**If help is needed**, you can now ping helpers. Be sure that you have "
+                                       "crafted a **well-developed question** and have shown your **thought "
+                                       "process**. To ping helpers, confirm with the buttom below.",
+                                 inline=False)
+
+        ping_helpers = await interaction.channel.send(f"{interaction.user.mention}", embed=question_embed)
+        await ping_helpers.edit(view=
+        QuestionConfirm(self.bot, ping_helpers, interaction))
 
     async def remove_study_role(self, user_id: int) -> None:
         try:
@@ -72,7 +184,7 @@ class Study(commands.Cog):
         await self.bot.db.study.set_time(inter.user.id, study_end)
 
         self.bot.loop.call_later(duration, asyncio.create_task, self.remove_study_role(inter.user.id))
-        await resp.edit(
+        await resp.edit( 
             f"The study role will be removed <t:{study_end}:R> at <t:{study_end}:f>."
         )
     
