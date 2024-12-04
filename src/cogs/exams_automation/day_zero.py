@@ -1,5 +1,5 @@
-import discord
-from discord.ext import tasks, commands
+import nextcord
+from nextcord.ext import tasks, commands
 
 import datetime
 from cogs.exams_automation.models import APChannel, APServer
@@ -42,7 +42,7 @@ class DayEight(commands.Cog):
     @beginning.before_loop
     async def pre_beginning(self):
         date = datetime.datetime(year=2023, month=5, day=self.n, hour=8, minute=0, second=0)
-        await discord.utils.sleep_until(date)
+        await nextcord.utils.sleep_until(date)
 
     @tasks.loop(seconds=1, count=1)
     async def end(self):
@@ -72,7 +72,7 @@ class DayEight(commands.Cog):
     @end.before_loop
     async def pre_end(self):
         date = datetime.datetime(year=2023, month=5, day=self.n, hour=19, minute=0, second=0)
-        await discord.utils.sleep_until(date)
+        await nextcord.utils.sleep_until(date)
 
 
 class DayNine(commands.Cog):
@@ -92,7 +92,7 @@ class DayNine(commands.Cog):
     @beginning.before_loop
     async def pre_beginning(self):
         date = datetime.datetime(year=2023, month=5, day=self.n, hour=8, minute=0, second=0)
-        await discord.utils.sleep_until(date)
+        await nextcord.utils.sleep_until(date)
 
     @tasks.loop(seconds=1, count=1)
     async def end(self):
@@ -122,7 +122,7 @@ class DayNine(commands.Cog):
     @end.before_loop
     async def pre_end(self):
         date = datetime.datetime(year=2023, month=5, day=self.n, hour=19, minute=30, second=0)
-        await discord.utils.sleep_until(date)
+        await nextcord.utils.sleep_until(date)
 
 
 class DayTen(commands.Cog):
@@ -142,7 +142,7 @@ class DayTen(commands.Cog):
     @beginning.before_loop
     async def pre_beginning(self):
         date = datetime.datetime(year=2023, month=5, day=self.n, hour=8, minute=0, second=0)
-        await discord.utils.sleep_until(date)
+        await nextcord.utils.sleep_until(date)
 
     @tasks.loop(seconds=1, count=1)
     async def end(self):
@@ -172,7 +172,7 @@ class DayTen(commands.Cog):
     @end.before_loop
     async def pre_end(self):
         date = datetime.datetime(year=2023, month=5, day=self.n, hour=19, minute=0, second=0)
-        await discord.utils.sleep_until(date)
+        await nextcord.utils.sleep_until(date)
 
 
 class DayEleven(commands.Cog):
@@ -192,7 +192,7 @@ class DayEleven(commands.Cog):
     @beginning.before_loop
     async def pre_beginning(self):
         date = datetime.datetime(year=2023, month=5, day=self.n, hour=8, minute=0, second=0)
-        await discord.utils.sleep_until(date)
+        await nextcord.utils.sleep_until(date)
 
     @tasks.loop(seconds=1, count=1)
     async def end(self):
@@ -222,7 +222,7 @@ class DayEleven(commands.Cog):
     @end.before_loop
     async def pre_end(self):
         date = datetime.datetime(year=2023, month=5, day=self.n, hour=19, minute=0, second=0)
-        await discord.utils.sleep_until(date)
+        await nextcord.utils.sleep_until(date)
 
 
 class DayTwelve(commands.Cog):
@@ -242,7 +242,7 @@ class DayTwelve(commands.Cog):
     @beginning.before_loop
     async def pre_beginning(self):
         date = datetime.datetime(year=2023, month=5, day=self.n, hour=8, minute=0, second=0)
-        await discord.utils.sleep_until(date)
+        await nextcord.utils.sleep_until(date)
 
     @tasks.loop(seconds=1, count=1)
     async def end(self):
@@ -262,12 +262,12 @@ class DayTwelve(commands.Cog):
             channel = APChannel(guild, channel_name)
             await channel.open()
 
-        lounge = discord.utils.get(guild.categories, name="Lounge")
+        lounge = nextcord.utils.get(guild.categories, name="Lounge")
         for channel in lounge.channels:
             lounge_channel = APChannel(guild, channel.name)
             await lounge_channel.open()
 
-        events = discord.utils.get(guild.categories, name="Events")
+        events = nextcord.utils.get(guild.categories, name="Events")
         for channel in events.channels:
             events_channel = APChannel(guild, channel.name)
             await events_channel.open()
@@ -275,7 +275,7 @@ class DayTwelve(commands.Cog):
     @end.before_loop
     async def pre_end(self):
         date = datetime.datetime(year=2023, month=5, day=self.n, hour=19, minute=0, second=0)
-        await discord.utils.sleep_until(date)
+        await nextcord.utils.sleep_until(date)
 
 
 class DayThirteen(commands.Cog):
@@ -299,7 +299,7 @@ class DayThirteen(commands.Cog):
     @end.before_loop
     async def pre_end(self):
         date = datetime.datetime(year=2023, month=5, day=self.n, hour=3, minute=0, second=0)
-        await discord.utils.sleep_until(date)
+        await nextcord.utils.sleep_until(date)
 
 
 class DayFourteen(commands.Cog):
@@ -323,12 +323,12 @@ class DayFourteen(commands.Cog):
     @end.before_loop
     async def pre_end(self):
         date = datetime.datetime(year=2023, month=5, day=self.n, hour=3, minute=0, second=0)
-        await discord.utils.sleep_until(date)
+        await nextcord.utils.sleep_until(date)
 
 
 async def setup(bot):
-    await bot.add_cog(DayEight(bot), guilds=[discord.Object(id=bot.guild_id)])
-    await bot.add_cog(DayNine(bot), guilds=[discord.Object(id=bot.guild_id)])
-    await bot.add_cog(DayTen(bot), guilds=[discord.Object(id=bot.guild_id)])
-    await bot.add_cog(DayEleven(bot), guilds=[discord.Object(id=bot.guild_id)])
-    await bot.add_cog(DayTwelve(bot), guilds=[discord.Object(id=bot.guild_id)])
+    await bot.add_cog(DayEight(bot), guilds=[nextcord.Object(id=bot.guild_id)])
+    await bot.add_cog(DayNine(bot), guilds=[nextcord.Object(id=bot.guild_id)])
+    await bot.add_cog(DayTen(bot), guilds=[nextcord.Object(id=bot.guild_id)])
+    await bot.add_cog(DayEleven(bot), guilds=[nextcord.Object(id=bot.guild_id)])
+    await bot.add_cog(DayTwelve(bot), guilds=[nextcord.Object(id=bot.guild_id)])

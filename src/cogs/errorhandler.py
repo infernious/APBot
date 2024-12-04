@@ -1,8 +1,8 @@
-import discord
-from discord import Interaction
-from discord import app_commands
-from discord.app_commands import AppCommandError
-from discord.ext import commands
+import nextcord
+from nextcord import Interaction
+from nextcord import app_commands
+from nextcord.application_command import AppCommandError
+from nextcord.ext import commands
 
 
 class ErrorHandler(commands.Cog):
@@ -18,35 +18,35 @@ class ErrorHandler(commands.Cog):
         tree.on_error = tree.__class__.on_error
 
     # the global error handler for all app commands (slash & ctx menus)
-    async def on_application_command_error(self, interaction: Interaction, error: AppCommandError):
+    async def on_app_command_error(self, interaction: Interaction, error: AppCommandError):
 
-        error_message = discord.Embed(title="", color=0xff0000)
+        error_message = nextcord.Embed(title="", color=0xff0000)
 
-        if isinstance(error, commands.CheckFailure):
+        if isinstance(error, app_commands.CheckFailure):
             error_message.add_field(name='Error: Check Failure', value=f'```\n{error}\n```', inline=False)
-        elif isinstance(error, commands.NoPrivateMessage):
+        elif isinstance(error, app_commands.NoPrivateMessage):
             error_message.add_field(name='Error: No Private Message', value=f'```\n{error}\n```', inline=False)
-        elif isinstance(error, commands.MissingRole):
+        elif isinstance(error, app_commands.MissingRole):
             error_message.add_field(name='Error: Missing Role', value=f'```\n{error}\n```', inline=False)
-        elif isinstance(error, commands.MissingAnyRole):
+        elif isinstance(error, app_commands.MissingAnyRole):
             error_message.add_field(name='Error: Missing Any Role', value=f'```\n{error}\n```', inline=False)
-        elif isinstance(error, commands.MissingPermissions):
+        elif isinstance(error, app_commands.MissingPermissions):
             error_message.add_field(name='Error: Missing Permissions', value=f'```\n{error}\n```', inline=False)
-        elif isinstance(error, commands.BotMissingPermissions):
+        elif isinstance(error, app_commands.BotMissingPermissions):
             error_message.add_field(name='Error: Bot Missing Permissions', value=f'```\n{error}\n```', inline=False)
-        elif isinstance(error, commands.CommandOnCooldown):
+        elif isinstance(error, app_commands.CommandOnCooldown):
             error_message.add_field(name='Error: Command On Cooldown', value=f'```\n{error}\n```', inline=False)
-        elif isinstance(error, commands.CommandLimitReached):
+        elif isinstance(error, app_commands.CommandLimitReached):
             error_message.add_field(name='Error: Command Limit Reached', value=f'```\n{error}\n```', inline=False)
-        elif isinstance(error, commands.CommandAlreadyRegistered):
+        elif isinstance(error, app_commands.CommandAlreadyRegistered):
             error_message.add_field(name='Error: Command Already Registered', value=f'```\n{error}\n```', inline=False)
-        elif isinstance(error, commands.CommandSignatureMismatch):
+        elif isinstance(error, app_commands.CommandSignatureMismatch):
             error_message.add_field(name='Error: Command Signature Mismatch', value=f'```\n{error}\n```', inline=False)
-        elif isinstance(error, commands.CommandNotFound):
+        elif isinstance(error, app_commands.CommandNotFound):
             error_message.add_field(name='Error: Command Not Found', value=f'```\n{error}\n```', inline=False)
-        elif isinstance(error, commands.MissingApplicationID):
+        elif isinstance(error, app_commands.MissingApplicationID):
             error_message.add_field(name='Error: Missing Application ID', value=f'```\n{error}\n```', inline=False)
-        elif isinstance(error, commands.CommandSyncFailure):
+        elif isinstance(error, app_commands.CommandSyncFailure):
             error_message.add_field(name='Error: Command Sync Failure', value=f'```\n{error}\n```', inline=False)
         else:
             error_message.add_field(name='Error!',
@@ -56,9 +56,9 @@ class ErrorHandler(commands.Cog):
 
         try:
             await interaction.response.send_message(embed=error_message, ephemeral=True)
-        except discord.errors.InteractionResponded:
+        except nextcord.errors.InteractionResponded:
             await interaction.followup.send(embed=error_message, ephemeral=True)
 
 
 async def setup(bot) -> None:
-    await bot.add_cog(ErrorHandler(bot), guilds=[discord.Object(id=bot.guild_id)])
+    await bot.add_cog(ErrorHandler(bot), guilds=[nextcord.Object(id=bot.guild_id)])
