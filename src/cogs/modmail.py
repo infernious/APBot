@@ -1,147 +1,148 @@
-from bot_base import APBot
-from nextcord import (
-    Attachment,
-    Embed,
-    Interaction,
-    Message,
-    SlashOption,
-    TextChannel,
-    Thread,
-    User,
-    slash_command,
-)
-from nextcord.ext import application_checks, commands
+import nextcord
+from nextcord import app_commands
+from nextcord.ext import tasks, commands
+
+import datetime
+
+modmail_id = 1060459641244500038
+blue = 0x00ffff
+orange = 0xffa07a
 
 
 class Modmail(commands.Cog):
-    """Modmail (User proxy) between user and staff"""
+    """Read and send messages to other users"""
 
-    def __init__(self, bot: APBot) -> None:
+    def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
+        self.delay.start()
 
-    @slash_command(name="mm", description="House all the modmail commands")
-    async def _mm(self, inter: Interaction):
-        ...
+    @tasks.loop(minutes=5)
+    async def delay(self):
+        """
+        Clears list of people who have DMed the bot in the past 5 minutes to reset the cooldown.
+        """
+        bot_config = await self.bot.read_user_config(self.bot.application_id)
+        bot_config["modmail_users"].clear()
+        await self.bot.update_user_config(self.bot.application_id, bot_config)
 
     @commands.Cog.listener()
-    async def on_message(self, message: Message):
+    async def on_message(self, message):
+
         """
-        Sends messages sent from the bot's DMs to the modmail channel.
+        Sends messages sent to the bot's DMs to the modmail channel.
             - Checks if the message is not from the bot and if the message is not from a server.
             - Creates a modmail embed to send in thread.
         """
 
-        if message.guild or message.author == self.bot.user or message.author not in self.bot.guild.members:
+        if message.author != self.bot.user:
+
+            if message.guild:
+                return
+
+            bot_config = await self.bot.read_user_config(self.bot.application_id)
+            if message.author.id in bot_config["modmail_users"]:
+                await message.author.send(
+                    f"You have already contacted the mods recently. You are able to send another message "
+                    f"{nextcord.utils.format_dt(self.delay.next_iteration, style='R')}.")
+
+            elif isinstance(message.channel, nextcord.DMChannel) and message.author != self.bot.user:
+
+                await message.author.send("Your message has been sent to the mod inbox. We will contact you if needed.")
+
+                modmail_embed = nextcord.Embed(title="", color=blue)
+                modmail_embed.add_field(name=f"", value=f'{message.content}\n - {message.author.mention}',
+                                        inline=False)
+                modmail_embed.timestamp = datetime.datetime.now()
+
+                if message.attachments:
+                    modmail_embed.set_image(url=message.attachments[0].proxy_url)
+
+                guild = self.bot.get_guild(self.bot.guild_id)
+                user_config = await self.bot.read_user_config(message.author.id)
+
+                try:
+                    thread = await guild.fetch_channel(user_config["modmail_id"])
+                    await thread.send(embed=modmail_embed)
+                except (KeyError, nextcord.errors.NotFound, nextcord.errors.Forbidden):
+                    modmail = nextcord.utils.get(guild.channels, name="modmail")
+                    create_thread = await modmail.create_thread(
+                        name=f"{message.author.name}#{message.author.discriminator}: {message.author.id}",
+                        embed=modmail_embed)
+                    thread = create_thread.thread
+
+                    user_config["modmail_id"] = thread.id
+                    await self.bot.update_user_config(message.author.id, user_config)
+
+                if len(message.attachments) > 1:
+
+                    attachments_count = 1
+
+                    for attachment in message.attachments:
+
+                        attachment_embed = nextcord.Embed(title="", color=blue)
+
+                        try:
+                            attachment_embed.set_image(url=message.attachments[attachments_count].proxy_url)
+                            attachment_embed.set_footer(text=f"{attachments_count + 1}/{len(message.attachments)} attachments")
+                        except IndexError:
+                            break
+
+                        attachments_count += 1
+                        await thread.send(embed=attachment_embed)
+
+                bot_config = await self.bot.read_user_config(self.bot.application_id)
+                bot_config["modmail_users"].append(message.author.id)
+                await self.bot.update_user_config(self.bot.application_id, bot_config)
+
+    @commands.Cog.listener()
+    async def on_reaction_add(self, reaction, user):
+        try:
+            if reaction.emoji == "✅":
+                if reaction.message.channel.parent.name == "modmail":
+                    await reaction.message.channel.edit(archived=True)
+        except AttributeError:
             return
 
-        if message.author.id in await self.bot.db.modmail.get_banned_users():
-            await message.author.send(
-                embed=Embed(
-                    title="Mail from not the mods",
-                    description="You are banned from using modmail. Please contact an admin directly for further assistance.",
-                )
-            )
-            return
+    @app_commands.checks.has_permissions(moderate_members=True)
+    @app_commands.command(name='send', description='Send messages to other members through modmail.')
+    async def send(self, interaction: nextcord.Interaction, message: str, member: nextcord.User = None,
+                   attachment: nextcord.Attachment = None):
 
-        content = message.content or "No content"
-
-        # add handling to send messages > 2000 chars
-        modmail_embed = Embed(
-            title="",
-            description=f"```\n{content}\n```",
-            color=self.bot.colors["blue"],
-        ).set_author(name=message.author.display_name, icon_url=message.author.display_avatar.url)
-
-        thread_id = await self.bot.db.modmail.get_channel(message.author.id)
-        if thread_id:
-            thread = await self.bot.getch_channel(thread_id)
-            await thread.send(embed=modmail_embed)
-        else:
-            modmail_channel: TextChannel = await self.bot.getch_channel(self.bot.config.get("modmail_channel"))
-            thread: Thread = await modmail_channel.create_thread(name=f"{message.author} ({message.author.id})", embed=modmail_embed)
-            await self.bot.db.modmail.set_channel(message.author.id, thread.id)
-
-        for ind, attachment in enumerate(message.attachments):
-            await thread.send(
-                embed=Embed(title=f"Attachment {ind+1} / {len(message.attachments)}", color=self.bot.colors["blue"])
-                .set_author(name=message.author.name, icon_url=message.author.avatar.url)
-                .set_image(url=attachment.url)
-            )
-
-        await message.add_reaction("✅")
-
-    @_mm.subcommand(name="send", description="Send a message to the user through modmail")
-    @application_checks.has_permissions(moderate_members=True)
-    async def send(
-        self,
-        inter: Interaction,
-        message: str = SlashOption(name="message", description="Message to send to the user", required=False),
-        attachment: Attachment = SlashOption(name="attachment", description="Attachment to send along with the message", required=False),
-    ):
         """
         Send messages to server members (cannot send message to users not in a server with the bot).
             - Generates a response/member embed.
             - Checks if member is in the cooldown list and removes them if so.
         """
 
-        if inter.channel.parent_id != self.bot.config.get("modmail_channel"):
-            return await inter.send("You can use that only in modmail threads.", ephemeral=True)
+        if member is None:
+            try:
+                if interaction.channel.parent.name == "modmail":
+                    member = self.bot.get_user(interaction.channel.name.split()[-1])
+                    if member is None:
+                        member = await self.bot.fetch_user(interaction.channel.name.split()[-1])
+            except AttributeError:
+                raise app_commands.AppCommandError("Please specify a user or use the command in a modmail thread.")
 
-        if not message and not attachment:
-            return await inter.send("You must specify a message or an attachment!", ephemeral=True)
-
-        user = await self.bot.getch_user(int(inter.channel.name.split(" ")[-1]))
-        send_embed = Embed(title="Mail from the mods.", description=message, color=self.bot.colors["orange"])
-
+        send_embed = nextcord.Embed(title="", color=orange)
+        send_embed.add_field(name="Message from the mods!", value=f"{message} \u200b")
+        send_embed.timestamp = datetime.datetime.now()
         if attachment:
             send_embed.set_image(url=attachment.proxy_url)
+        await member.send(embed=send_embed)
 
-        await user.send(embed=send_embed)
-
-        response_embed = Embed(title=f"Message sent to {user.name}", description=f"```\n{message}\n```", color=self.bot.colors["orange"])
-
+        response_embed = nextcord.Embed(title="", color=orange)
+        response_embed.add_field(name=f"Message sent to {member.name}#{member.discriminator}!",
+                                 value=f"```{message}```")
+        response_embed.timestamp = datetime.datetime.now()
         if attachment:
             response_embed.set_image(url=attachment.proxy_url)
+        await interaction.response.send_message(embed=response_embed)
 
-        await inter.response.send_message(embed=response_embed)
-
-    @_mm.subcommand(name="ban", description="Ban a user from using modmail")
-    @application_checks.has_permissions(moderate_members=True)
-    async def _mm_ban(
-        self,
-        inter: Interaction,
-        user: User = SlashOption(name="user", description="User to ban. Defaults to current channel author.", required=False),
-    ):
-        """Bans a user from using modmail"""
-        if not user and inter.channel.parent_id != self.bot.config.get("modmail_channel"):
-            return await inter.send("You must either specify a user or be present in a modmail thread!", ephemeral=True)
-
-        user_id = user.id if user else int(inter.channel.name.split(" ")[-1])
-
-        await self.bot.db.modmail.ban_user(user_id)
-        await inter.send(f"Banned {user.mention} ({user.id}) from modmail", ephemeral=True)
-
-    @_mm.subcommand(name="unban", description="Unan a user from using modmail")
-    @application_checks.has_permissions(moderate_members=True)
-    async def _mm_unban(
-        self,
-        inter: Interaction,
-        user: User = SlashOption(name="user", description="User to unban. Defaults to current channel author.", required=False),
-    ):
-        """Unbans a user from using modmail"""
-        if not user and inter.channel.parent_id != self.bot.config.get("modmail_channel"):
-            return await inter.send("You must either specify a user or be present in a modmail thread!", ephemeral=True)
-
-        user_id = user.id if user else int(inter.channel.name.split(" ")[-1])
-        await self.bot.db.modmail.unban_user(user_id)
-        await inter.send(f"Unbanned user {user} from modmail", ephemeral=True)
-
-    @_mm.subcommand(name="unset_channel", description="Delete the recorded modmail channel for a particular user. User for debugging.")
-    @application_checks.has_permissions(moderate_members=True)
-    async def _mm_unset_channel(self, inter: Interaction, user: User):
-        await self.bot.db.modmail.unset_channel(user.id)
-        await inter.send("Done", ephemeral=True)
+        bot_config = await self.bot.read_user_config(self.bot.application_id)
+        if member.id in bot_config["modmail_users"]:
+            bot_config["modmail_users"].remove(member.id)
+            await self.bot.update_user_config(self.bot.application_id, bot_config)
 
 
-def setup(bot: APBot):
-    bot.add_cog(Modmail(bot))
+async def setup(bot):
+    await bot.add_cog(Modmail(bot), guilds=[nextcord.Object(id=bot.guild_id)])

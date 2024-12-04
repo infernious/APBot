@@ -1,4 +1,4 @@
-import discord
+import nextcord
 import datetime
 
 red = 0xff0000
@@ -9,28 +9,28 @@ nonessential_textchannels = ["welcome", "general-2", "college", "bot-commands",
                              "post-ap-math", "higher-cs", "higher-other",
                              "aphome-econ", "apresearch", "apart-design"]
 
-subject_channels = [#["apgov-us", "apchem", "apspanish-lit", None],
-                    #["apchinese", "apes", "appsych", None],
-                    #["aplit", "apgov-comp", "apcsa", None],
-                    #["aphug", "apmacro", "apseminar", "apstats"],
-                    #["apeuro", "apush", "aparthistory", "apmicro"],
-                    ["apcalc-ab", "apcalc-bc", "apcsp", "apitalian"],
-                    ["aplang", "apjapanese", "apphysicsc-mech", "apphysicsc-em"],
-                    ["apspanish-lang", "apbio", None, None],
-                    ["apfrench", "apwh-modern", "apphysics1", None],
-                    ["apgerman", "apmusictheory", "aplatin", "apphysics2"]]
+subject_channels = [["apgov-us", "aparthistory", "apchem", None],
+                    ["aphug", "apmicro", "apseminar", "apstats"],
+                    ["aplit", "apgov-comp", "apcsa", None],
+                    ["apchinese", "apes", "appsych", None],
+                    ["apeuro", "apush", "apmacro", "apspanish-lit"],
+                    ["apcalc-ab", "apcalc-bc", "apitalian", "apprecalc"],
+                    ["aplang", "apafam-studies", "apphysicsc-mech", "apphysicsc-em"],
+                    ["apfrench", "apwh-modern", "apcsp", "apmusictheory"],
+                    ["apspanish-lang", "apbio", "apjapanese", None],
+                    ["apgerman", "apphysics1", "aplatin", "apphysics2"]]
 
 
 class APChannel:
 
     def __init__(self, guild, channel_name):
-        self.channel = discord.utils.get(guild.channels, name=channel_name)
+        self.channel = nextcord.utils.get(guild.channels, name=channel_name)
         self.guild = guild
 
     def ap_roles(self):
 
-        ap_roles = [role for role in self.channel.overwrites if isinstance(role, discord.Role) and
-                    ((role.color == discord.Colour.blue() or role.color == discord.Color(0x94dfa2)) or
+        ap_roles = [role for role in self.channel.overwrites if isinstance(role, nextcord.Role) and
+                    ((role.color == nextcord.Colour.blue() or role.color == nextcord.Color(0x94dfa2)) or
                     ("ap " in role.name.lower()) or
                     (role.name == "Post-AP Math" or role.name == "Higher CS" or role.name == "Higher Other"))]
 
@@ -40,7 +40,7 @@ class APChannel:
         return ap_roles
 
     def create_embed(self):
-        embed = discord.Embed(title="")
+        embed = nextcord.Embed(title="")
         return embed
 
     async def shutdown(self):
@@ -60,7 +60,7 @@ class APChannel:
 
         ap_roles = self.ap_roles()
         for role in ap_roles:
-            generals = discord.utils.get(self.guild.categories, name="General Channels")
+            generals = nextcord.utils.get(self.guild.categories, name="General Channels")
             if self.channel not in generals.channels:
                 await self.channel.set_permissions(role, read_messages=True)
             else:
@@ -85,19 +85,19 @@ class APServer:
             channel = APChannel(self.guild, channel_name)
             await channel.shutdown()
 
-        ap_channels = discord.utils.get(self.guild.categories, name="Subject Channels")
+        ap_channels = nextcord.utils.get(self.guild.categories, name="Subject Channels")
         for channel in ap_channels.channels:
             ap_channel = APChannel(self.guild, channel.name)
             await ap_channel.shutdown()
 
         subject_channels.pop(0)
 
-        voice_channels = discord.utils.get(self.guild.categories, name="Voice Channels")
+        voice_channels = nextcord.utils.get(self.guild.categories, name="Voice Channels")
         for channel in voice_channels.channels:
             voice_channel = APChannel(self.guild, channel.name)
             await voice_channel.shutdown()
 
-        misc_channels = discord.utils.get(self.guild.categories, name="AP 2023 Exam Season")
+        misc_channels = nextcord.utils.get(self.guild.categories, name="AP 2024 Exam Season")
         for channel in misc_channels.channels:
             if not channel.name == "ap-exam-info-2023":
                 misc_channel = APChannel(self.guild, channel.name)
@@ -116,7 +116,7 @@ class APServer:
                 subject_channel = APChannel(self.guild, channel_name)
                 await subject_channel.open()
 
-        misc_channels = discord.utils.get(self.guild.categories, name="AP 2023 Exam Season")
+        misc_channels = nextcord.utils.get(self.guild.categories, name="AP 2024 Exam Season")
         for channel in misc_channels.channels:
             if not channel.name == "ap-exam-info-2023":
                 misc_channel = APChannel(self.guild, channel.name)

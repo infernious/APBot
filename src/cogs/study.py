@@ -4,7 +4,7 @@ import nextcord
 from typing import Union
 
 from nextcord import Interaction, SlashOption, slash_command
-from nextcord.ext import commands
+from nextcord.ext import tasks, commands
 from nextcord.ui import Button
 
 from bot_base import APBot
@@ -57,6 +57,19 @@ class Study(commands.Cog):
     def __init__(self, bot: APBot) -> None:
         self.bot = bot
         self.cooldowns = {}
+        self.check_studiers.start()
+
+        self.pin_ctx_menu = nextcord.application_commands.ContextMenu(
+            name="Pin Message",
+            callback=self.pin
+        )
+        self.bot.tree.add_command(self.pin_ctx_menu)
+
+        self.unpin_ctx_menu = nextcord.app_commands.ContextMenu(
+            name="Unpin Message",
+            callback=self.unpin
+        )
+        self.bot.tree.add_command(self.unpin_ctx_menu)
 
     @slash_command(name='question', description='Ask a question in a subject channel.')
     async def question(self, interaction: nextcord.Interaction, question: str, attachment: nextcord.Attachment = None):
@@ -140,6 +153,67 @@ class Study(commands.Cog):
 
         await self.bot.db.study.delete_user(user_id)
         await user.remove_roles(role)
+    
+    @slash_command(name='potd', description='Make a problem-of-the-day for a subject channel.')
+    async def potd(self, interaction: nextcord.Interaction, title: str, problem: str, attachment: nextcord.Attachment = None):
+
+        """
+        Submit a problem-of-the-day in a subject channel.
+            - Checks if POTD is in subject channel.
+            - Edits the channel topic with the number of POTDs.
+            - Creates a thread for the POTD.
+            - Removes all past POTDs if they haven't been removed yet.
+        """
+
+        user_id = interaction.user.id
+        current_time = time.time()
+        cooldown_duration = 86400 # Set command cooldown as 60 seconds  
+        if user_id in self.cooldowns:
+            elapsed_time = current_time - self.cooldowns[user_id]
+            if elapsed_time < cooldown_duration:
+                await interaction.response.send_message(
+                    f"Command on cooldown. Try again in {round(cooldown_duration - elapsed_time, 2)} seconds.",
+                    ephemeral=True
+                )
+                return
+
+        self.cooldowns[user_id] = current_time
+
+        subject_channels = nextcord.utils.get(interaction.guild.categories, name="Subject Channels")
+
+        if interaction.channel.category != subject_channels:
+            raise nextcord.app_commands.AppCommandError("Please provide a POTD only in the subject channels.")
+
+        try:
+            topic_split = interaction.channel.topic.split()
+            count = int(topic_split[-1]) + 1
+            topic_split[-1] = f"{count}"
+            new_topic = ' '.join(topic_split)
+        except ValueError:
+            count = 1
+            new_topic = f"{interaction.channel.topic} | POTD Count: {count}"
+        except AttributeError:
+            count = 1
+            new_topic = "POTD Count: 1"
+        await interaction.channel.edit(topic=new_topic)
+
+        potd_embed = nextcord.Embed(title=f"", color=blue)
+        potd_embed.add_field(name=f"POTD #{count}: {title}", value=f"```{problem}```")
+        if attachment:
+            potd_embed.set_image(url=attachment.proxy_url)
+
+        await interaction.response.send_message(embed=potd_embed)
+        potd_message = await interaction.original_response()
+        await interaction.channel.create_thread(name=f"POTD #{count}: {title}", message=potd_message,
+                                                reason=f"#{interaction.channel.name} POTD #{count}: {title}")
+
+        pins = await interaction.channel.pins()
+        pins = pins[::1]
+        for message in pins:
+            if message.embeds:
+                if "POTD" in message.embeds[0].fields[0].name.split():
+                    await message.unpin()
+        await potd_message.pin()
     
 
     @slash_command(name="study", description="Prevent yourself from viewing unhelpful channels.")
@@ -253,6 +327,54 @@ class Study(commands.Cog):
             else:
                 self.bot.loop.call_later(seconds, asyncio.create_task, self.remove_study_role(user_id))
 
+    @nextcord.app_commands.checks.has_role("Honorable")
+    async def pin(self, interaction: nextcord.Interaction, message: nextcord.Message):
 
-def setup(bot: APBot):
-    bot.add_cog(Study(bot))
+        """
+        Pins a message using the bot.
+        """
+
+        await message.pin()
+        embed = nextcord.Embed(color=blue)
+        embed.add_field(name="Pinned! ✔", value="Message successfully pinned.")
+        await interaction.response.send_message(embed=embed)
+
+    @nextcord.app_commands.checks.has_role("Honorable")
+    async def unpin(self, interaction: nextcord.Interaction, message: nextcord.Message):
+
+        """
+        Unpins a message using the bot.
+        """
+
+        await message.unpin()
+        embed = nextcord.Embed(color=blue)
+        embed.add_field(name="Unpinned! ✔", value="Message successfully unpinned.")
+        await interaction.response.send_message(embed=embed)
+
+    @tasks.loop(minutes=5)
+    async def check_studiers(self):
+
+        """
+        Checks every 5 minutes if any study roles need to be removed.
+        """
+
+        guild = self.bot.get_guild(self.bot.guild_id)
+        cursor = self.bot.user_config.find({"study_time_until": {"$lte": time.datetime.now()}})
+        documents = await cursor.to_list(length=100)
+
+        for document in documents:
+            member = guild.get_member(document["user_id"])
+            role = nextcord.utils.get(guild.roles, name="Study")
+
+            if role in member.roles:
+                await member.remove_roles(role)
+
+            await self.bot.user_config.update_one({"_id": document["_id"]}, {"$unset": {"study_time_until": ""}})
+
+    @check_studiers.before_loop
+    async def check_studiers_before_loop(self):
+        await self.bot.wait_until_ready()
+
+
+async def setup(bot):
+    await bot.add_cog(Study(bot), guilds=[nextcord.Object(id=bot.guild_id)])
