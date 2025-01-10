@@ -1,186 +1,113 @@
-import io
-
-import motor
-import nextcord
-from nextcord import app_commands
+import re
+from nextcord import Embed, Interaction, SlashOption, slash_command, Attachment
 from nextcord.ext import commands
-
-ROLE_CAN_MAKE_TAGS = ["Chat Moderator", "Admin", "Honorable"]
-
-FAILURE_EMBED = nextcord.Embed(colour=nextcord.Colour.red())
-SUCCESS_EMBED = nextcord.Embed(colour=nextcord.Colour.green())
-
-ALLOWED_MENTIONS = nextcord.AllowedMentions.none()
-ALLOWED_MENTIONS.replied_user = True
-
-DISCORD_FILE_LIMIT = 10
-
-
-class File:
-    """
-    A file to store in the tag db
-    """
-
-    def __init__(self, filename: str, data: bytes):
-        self.filename = filename
-        self.data = data
-
-
-class TagDb:
-    """
-    Manages access to tag storage
-    """
-
-    def __init__(self, db: motor.motor_asyncio.AsyncIOMotorCollection):
-        self.db = db
-
-    async def get_tag(self, name: str) -> str | None:
-        maybe_found = await self.db.find_one({"name": name})
-        if not maybe_found:
-            return None
-
-        return maybe_found
-
-    async def insert_tag(self, name: str, value: str, attachments: list[File] | None) -> None:
-        if not attachments:
-            attachments = []
-
-        attachments = [{"filename": attachment.filename, "data": attachment.data} for attachment in attachments]
-
-        if await self.get_tag(name):
-            raise KeyError("Tag already exists - try removing it first?")
-
-        # Security: no idc about sanitization because mods are nice right guys?
-        # Okay maybe I do care but I'll just remember to remove mentions from the bot when using tags
-        await self.db.insert_one({"name": name, "value": value, "attachments": attachments[:DISCORD_FILE_LIMIT]})
-
-    async def delete_tag(self, name: str) -> None:
-        if not await self.get_tag(name):
-            raise KeyError("Tag doesn't exist - can't be deleted")
-
-        tag = await self.db.delete_one({"name": name})
-
-    async def list_tags(self) -> list[str]:
-        tags = await self.db.find({"name": {"$exists": True}}).to_list(length=None)
-        return list(map(lambda tag: tag["name"], tags))
-
-
-class TagNameTextbox(nextcord.ui.Modal):
-    """
-    A text box to let a user chose a tag name
-    """
-
-    tag_name = nextcord.ui.TextInput(label="Type tag name here", placeholder="tag name")
-
-    def __init__(self, tag_content: nextcord.Message, tag_db: TagDb):
-        super().__init__(title="Tag Name")
-        self.tag_content = tag_content
-        self.tag_db = tag_db
-
-    async def on_submit(self, interaction: nextcord.Interaction):
-        new_attachments = []
-        for attachment in self.tag_content.attachments:
-            new_attachments.append(File(attachment.filename, await attachment.read()))
-
-        try:
-            await self.tag_db.insert_tag(str(self.tag_name), self.tag_content.content, attachments=new_attachments)
-
-            embed = SUCCESS_EMBED
-            embed.title = "Success"
-            embed.description = f"Tag `{self.tag_name}` is available!"
-
-        except KeyError as e:
-            embed = FAILURE_EMBED
-            embed.title = "Failed to create tag"
-            embed.description = f"{e}"
-
-        await interaction.response.send_message(embed=embed)
-
-
-def can_make_tags(interaction: nextcord.Interaction) -> bool:
-    check = any([role.name in ROLE_CAN_MAKE_TAGS for role in interaction.user.roles])
-    if not check:
-        raise commands.CommandError(
-            message=f"No permission to create tags! Needs to have one of these roles: {ROLE_CAN_MAKE_TAGS}"
-        )
-    return check
-
+from bot_base import APBot  # Ensure this is imported correctly
 
 class Tags(commands.Cog):
-    """
-    A system to let users respond with automated replies.
-    Because getting asked for study resources all the time is annoying :(
-    """
-
-    async def new_tag(self, interaction: nextcord.Interaction, message: nextcord.Message):
-        """
-        Creates a new tag that any user can use.
-        """
-
-        await interaction.response.send_modal(TagNameTextbox(message, self.tag_db))
-
-    def __init__(self, bot: commands.Bot, tag_db: TagDb):
+    def __init__(self, bot: APBot) -> None:
         self.bot = bot
-        self.tag_db = tag_db
 
-        new_tag_menu = app_commands.ContextMenu(name="New Tag", callback=self.new_tag)
-        new_tag_menu.add_check(can_make_tags)
-        self.bot.tree.add_command(new_tag_menu)
+    @slash_command(name="tag", description="Manage tags")
+    async def _tag(self, inter: Interaction):
+        pass  # Main command logic, if needed.
 
-    @app_commands.command(name="tag", description="Uses a tag, replying to the user with the tag contents.")
-    async def use_tag(self, interaction: nextcord.Interaction, tag_name: str):
-        """
-        Uses a tag, replying to the user with the tag contents.
-        """
+    @_tag.subcommand(name="create", description="Create a new tag")
+    async def _tag_create(
+        self,
+        inter: Interaction,
+        name: str = SlashOption("name", description="Name of the tag", required=True),
+        content: Attachment = SlashOption("content", description="Content of the tag as a file or image", required=True)
+    ) -> None:
+        # Handle the content as a file or image
+        content_url = content.url  # Get the URL of the uploaded attachment
+        # Check if the tag already exists
+        if await self.bot.db.tags.exists(inter.guild.id, name):
+            return await inter.send("A tag with this name already exists.", ephemeral=False)
 
-        await interaction.response.defer()
+        # Create the tag in the database
+        await self.bot.db.tags.create(inter.guild.id, inter.user.id, name, content_url)
+        await inter.send(f"Tag '{name}' created successfully!", ephemeral=False)
 
-        maybe_tag = await self.tag_db.get_tag(tag_name)
-        if maybe_tag:
-            files = [nextcord.File(io.BytesIO(file["data"]), filename=file["filename"]) for file in maybe_tag["attachments"]]
-            await interaction.followup.send(maybe_tag["value"], files=files, allowed_mentions=ALLOWED_MENTIONS)
+    @_tag.subcommand(name="delete", description="Delete an existing tag")
+    async def _tag_delete(
+        self,
+        inter: Interaction,
+        name: str = SlashOption("name", description="Name of the tag", required=True)
+    ) -> None:
+        # Check if the tag exists
+        if not await self.bot.db.tags.exists(inter.guild.id, name):
+            return await inter.send("Tag not found.", ephemeral=False)
+
+        # Delete the tag from the database
+        await self.bot.db.tags.delete(inter.guild.id, name)
+        await inter.send(f"Tag '{name}' deleted successfully!", ephemeral=False)
+
+    @_tag.subcommand(name="list", description="List all tags")
+    async def _tag_list(self, inter: Interaction) -> None:
+        # Fetch all tags for the guild
+        tags = await self.bot.db.tags.get_all(inter.guild.id)
+
+        if not tags:
+            return await inter.send("No tags available in this server.", ephemeral=False)
+
+        # Format the list of tags
+        tag_list = "\n".join(f"- {tag['name']}" for tag in tags)
+        await inter.send(embed=Embed(title="Available Tags", description=tag_list), ephemeral=False)
+
+    @_tag.subcommand(name="edit", description="Edit an existing tag")
+    async def _tag_edit(
+        self,
+        inter: Interaction,
+        name: str = SlashOption("name", description="Name of the tag", required=True),
+        new_content: str = SlashOption("new_content", description="New content for the tag", required=True)
+    ) -> None:
+        # Check if the tag exists
+        if not await self.bot.db.tags.exists(inter.guild.id, name):
+            return await inter.send("Tag not found.", ephemeral=False)
+
+        # Update the tag content in the database
+        await self.bot.db.tags.update(inter.guild.id, name, new_content)
+        await inter.send(f"Tag '{name}' updated successfully!", ephemeral=False)
+
+    @_tag.subcommand(name="display", description="Display a tag's content")
+    async def _tag_display(
+        self,
+        inter: Interaction,
+        name: str = SlashOption("name", description="Name of the tag", required=True)
+    ) -> None:
+        # Fetch the tag content
+        tag = await self.bot.db.tags.get_tag(inter.guild.id, name)
+        if not tag:
+            return await inter.send("Tag not found.", ephemeral=False)
+
+        # Extract content
+        tag_content = tag['content']
+        
+        # Regular expression to find URLs in the content
+        url_pattern = r"(https?://[^\s]+)"
+        urls = re.findall(url_pattern, tag_content)
+
+        # Remove URLs from content for display
+        text_content = re.sub(url_pattern, "", tag_content).strip()
+
+        # Send message with image
+        if urls:
+            # Send the text content first
+            if text_content:
+                await inter.send(f"Tag '{name}' content:\n{text_content}", ephemeral=False)
+
+            # Send the image
+            for url in urls:
+                await inter.send(url, ephemeral=False)
         else:
-            embed = FAILURE_EMBED
-            embed.title = "Tag bytesbytesnot found"
-            await interaction.followup.send(embed=embed)
+            # Send text content only if no image URLs found
+            await inter.send(f"Tag '{name}' content:\n{text_content}", ephemeral=False)
 
-    @app_commands.check(can_make_tags)
-    @app_commands.command(name="remove_tag", description="Removes a tag, preventing it from being used.")
-    async def remove_tag(self, interaction: nextcord.Interaction, tag_name: str):
-        """
-        Removes a tag, preventing it from being used.
-        """
+    @commands.Cog.listener("on_ready")
+    async def _tag_on_ready(self) -> None:
+        print("Tag cog is ready.")
 
-        await interaction.response.defer()
-
-        try:
-            await self.tag_db.delete_tag(tag_name)
-
-            embed = FAILURE_EMBED
-            embed.title = "Success"
-            embed.description = f"Tag `{tag_name}` has been deleted."
-
-        except KeyError as e:
-            embed = FAILURE_EMBED
-            embed.title = "Failed to delete tag"
-            embed.description = f"{e}"
-
-        await interaction.followup.send(embed=embed)
-
-    @app_commands.command(name="listtags", description="Lists all active tags")
-    async def list_tags(self, interaction: nextcord.Interaction):
-        """
-        Lists all active tags
-        """
-
-        await interaction.response.defer()
-
-        await interaction.followup.send(
-            embed=nextcord.Embed(title="Available tags", description=", ".join(await self.tag_db.list_tags()))
-        )
+def setup(bot: APBot):
+    bot.add_cog(Tags(bot))
 
 
-async def setup(bot: commands.Bot) -> None:
-    tag_db = TagDb(bot.db.database["tags"])
-    await bot.add_cog(Tags(bot, tag_db), guilds=[nextcord.Object(id=bot.guild_id)])
-    await bot.tree.sync()  # Necessary to make our manually added (no decorator) commands show

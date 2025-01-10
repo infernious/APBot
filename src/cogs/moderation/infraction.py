@@ -1,9 +1,8 @@
-import datetime
-
-from nextcord import slash_command, Permissions, Interaction, User, Embed, Member, TextChannel, Object
+from nextcord import slash_command, Permissions, Interaction, User, Embed, Member, TextChannel, Object, Color
 from nextcord.ext import commands
 from typing import Optional
 from bot_base import APBot
+from datetime import datetime, timedelta
 
 
 class Infraction(commands.Cog):
@@ -11,84 +10,78 @@ class Infraction(commands.Cog):
         self.bot = bot
 
     @slash_command(name="warnings", description="Show infraction history of a member.", default_member_permissions=Permissions(moderate_members=True))
-    async def warnings(self, interaction: Interaction, user: User):
-        """
-        Retrieve full infraction history of a member.
-            - Reads each infraction in infraction history list.
-            - Sends an embed for each infraction.
-        """
-        await interaction.response.send_message(f"Fetching {user.mention}'s infractions...")
+    async def warnings(self, inter: Interaction, member: Member):
+        await inter.response.defer(ephemeral=False)  # Make the response visible to everyone
 
-        infractions = await self.bot.db.get_user_infractions(user.id)
-        count = 1
+        infraction_details = {
+            "warn": ("Warning", Color.from_rgb(255, 255, 0)),  # Yellow
+            "mute": ("Mute", Color.from_rgb(255, 165, 0)),   # Orange
+            "pseudo-mute": ("Pseudo-Mute", Color.from_rgb(255, 223, 186)),  # Light Orange
+            "unmute": ("Unmute", Color.from_rgb(0, 255, 0)),  # Green
+            "kick": ("Kick", Color.from_rgb(255, 140, 0)),    # Dark Orange
+            "ban": ("Ban", Color.from_rgb(255, 0, 0)),        # Red
+            "force-ban": ("Force-Ban", Color.from_rgb(255, 0, 0))  # Red
+        }
 
-        for infraction in infractions:
-            match infraction["type"]:
-                # /warn
-                case "warn":
-                    infraction_embed = Embed(
-                        title="",
-                        color=self.bot.colors.get("yellow")
-                    ).add_field(
-                        name=f"Warn by {infraction['moderator']}",
-                        value=f"**Reason:** {infraction['reason']}"
-                    )
+        # Retrieve infractions from the database
+        infractions = await self.bot.db.base_db.get_user_infractions(member.id)
 
-                # /wm (NOT /mute)
-                case "mute":
-                    infraction_embed = Embed(
-                        title="",
-                        color=self.bot.colors.get("orange")
-                    ).add_field(
-                        name=f"Mute by {infraction['mute_moderator']}",
-                        value=f"**Reason:** {infraction['mute_reason']}\n**Duration:** {infraction['duration']}"
-                    )
-                    if infraction["unmute_moderator"]:
-                        infraction_embed.add_field(
-                            name=f"Unmute by {infraction_embed['unmute_moderator']}",
-                            value=f"**Reason:** {infraction['unmute_reason']}"
-                        )
-                        infraction_embed.color = self.bot.colors.get("green")
+        if not infractions:
+            await inter.followup.send(f"{member.mention} has no infractions.", ephemeral=False)  # Make this message visible to everyone
+            return
 
-                
-                case "kick":
-                    infraction_embed = Embed(
-                        title="",
-                        color=self.bot.colors.get("dark_orange")
-                    ).add_field(
-                        name=f"Kick by {infraction['moderator']}",
-                        value=f"**Reason:** {infraction['reason']}"
-                    )
+        # Prepare a list to hold all embeds
+        embeds = []
 
-                # /ban
-                case "ban":
-                    infraction_embed = Embed(
-                        title="",
-                        color=self.bot.colors.get("red")
-                    ).add_field(
-                        name=f"Ban by {infraction['moderator']}",
-                        value=f"**Reason:** {infraction['reason']}"
-                    )
+        # Loop through the infractions, building embeds for each
+        for index, infraction in enumerate(infractions):
+            infraction_name, infraction_color = infraction_details.get(infraction.actiontype, ("Infraction", Color.default()))
 
-                # /forceban
-                case "force-ban":
-                    infraction_embed = Embed(
-                        title="",
-                        color=self.bot.colors.get("red")
-                    ).add_field(
-                        name=f"Force-Ban by {infraction['moderator']}",
-                        value=f"**Reason:** {infraction['reason']}"
-                    )
+            # Convert actiontime to datetime if it's stored as a string
+            if isinstance(infraction.actiontime, str):
+                try:
+                    infraction.actiontime = datetime.fromisoformat(infraction.actiontime)
+                except ValueError:
+                    infraction.actiontime = datetime.utcfromtimestamp(float(infraction.actiontime))
 
-            infraction_embed.set_footer(text=f"{count}/{len(infractions)} infractions")
-            count += 1
-            infraction_embed.timestamp = infraction["date"]
+            # Retrieve moderator details
+            moderator_id = infraction.moderator
+            moderator = inter.guild.get_member(moderator_id) or await self.bot.fetch_user(moderator_id)
+            moderator_name = moderator.display_name if moderator else "Unknown"
+            moderator_mention = moderator.mention if moderator else "Unknown"
 
-            if infraction["attachment"]:
-                infraction_embed.set_image(url=infraction['attachment'])
-            await interaction.channel.send(embed=infraction_embed)
+            # Build the infraction message
+            infraction_message = (
+                f"**Infraction:** {infraction_name}\n"
+                f"**Reason:** {infraction.reason}\n"
+                f"**Responsible Moderator:** {moderator_name} ({moderator_mention})\n"
+                f"**Date:** {infraction.actiontime.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            )
 
-        await interaction.followup.send(f"Complete, all infractions shown! {user.mention} has {len(infractions)} infraction points")
+            if infraction.duration:
+                mute_end = int((infraction.actiontime + timedelta(seconds=infraction.duration)).timestamp())
+                infraction_message += f"**Unmute:** <t:{mute_end}:f> (<t:{mute_end}:R>)\n"
+
+            if infraction.attachment_url:
+                infraction_message += f"**Attachment:** [Link]({infraction.attachment_url})\n"
+
+            # Create a new embed for this specific infraction
+            embed = Embed(
+                title=f"Infraction #{index + 1}",
+                description=infraction_message,
+                color=infraction_color
+            )
+
+            # Add the embed to the list
+            embeds.append(embed)
+
+        # Send embeds in groups of 10 (Discord's limit for embeds in one message)
+        for i in range(0, len(embeds), 10):
+            await inter.followup.send(embeds=embeds[i:i+10], ephemeral=False)  # Send visible embeds
+
+
+
+
 
     @slash_command(name="editip", description="Edit a member's infraction points.", default_member_permissions=Permissions(moderate_members=True))
     async def editip(self, interaction: Interaction, member: Member, change: int):
@@ -141,7 +134,7 @@ class Infraction(commands.Cog):
         """
         Displays current infraction points of a user.
         """
-        inf_points = len(self.bot.db.get_user_infractions(member.id))
+        inf_points = len(self.bot.db.base_db.get_user_infractions(member.id))
         if inf_points == 0:
             await interaction.response.send_message(f"{member.mention} has no infraction points.")
         elif inf_points == 1:
@@ -158,7 +151,7 @@ class Infraction(commands.Cog):
         if member and not interaction.user.guild_permissions.moderate_members:
             return await interaction.response.send_message("You do not have permission to check other's infraction points!")
         if not member:
-            inf_points = len(self.bot.db.get_user_infractions(interaction.user.id))
+            inf_points = len(self.bot.db.base_db.get_user_infractions(interaction.user.id))
             if inf_points == 0:
                 await interaction.response.send_message(f"You have no infraction points.")
             elif inf_points == 1:
@@ -167,7 +160,7 @@ class Infraction(commands.Cog):
                 await interaction.response.send_message(f"You have {inf_points} infraction points.")
             return
 
-        inf_points = len(self.bot.db.get_user_infractions(member.id))
+        inf_points = len(self.bot.db.base_db.get_user_infractions(member.id))
         if inf_points == 0:
             await interaction.response.send_message(f"{member.mention} has no infraction points.")
         elif inf_points == 1:
@@ -176,5 +169,5 @@ class Infraction(commands.Cog):
             await interaction.response.send_message(f"{member.mention} has {inf_points} infraction points.")
 
 
-async def setup(bot: APBot):
-    await bot.add_cog(Infraction(bot), guilds=[Object(id=bot.guild_id)])
+async def setup(bot: APBot) -> None:
+    await bot.add_cog(Infraction(bot))

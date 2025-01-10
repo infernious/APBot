@@ -3,15 +3,18 @@ from dotenv import load_dotenv
 load_dotenv()
 import random
 from datetime import datetime
-import logging
+
 from typing import List, Optional, Union
 import time
 import motor.motor_asyncio as motor
 import sqlite3
 from config_handler import Config
-
 database_client = motor.AsyncIOMotorClient(os.getenv("APBOT_DATABASE_CONNECT_URL"))
+from models import Infraction
 
+import logging
+from typing import Optional
+logger = logging.getLogger(__name__)
 
 class SingletonMeta(type):
     _instances = {}
@@ -32,7 +35,27 @@ class BaseDatabase(metaclass=SingletonMeta):
         self.ban_appeals = self.database["ban_appeals"]
         self.reminders = self.database["reminders"]
         self.recurrent = self.database["recurrent"]
+        self.tags = self.database["tags"]
         self.conf = conf
+    async def add_inf_points(self, user_id: int, points: int) -> Optional[int]:
+        try:
+            # Read the current user configuration
+            user_config = await self.read_user_config(user_id)
+
+            # Calculate new infraction points
+            new_points = user_config.get("infraction_points", 0) + points
+            user_config["infraction_points"] = new_points
+
+            # Update the user's configuration in the database
+            await self.update_user_config(user_id, user_config)
+
+            # Return the updated points
+            return new_points
+
+        except Exception as e:
+            print(f"Error updating infraction points for user_id {user_id}: {e}")
+            return None
+
 
     async def read_user_config(self, user_id: int):
         config_from_db = await self.user_config.find_one({"user_id": user_id})
@@ -44,14 +67,45 @@ class BaseDatabase(metaclass=SingletonMeta):
         return config_from_db
 
     async def update_user_config(self, user_id: int, new_config):
-        old_config = await self.user_config.find_one({"user_id": user_id})
+        try:
+            old_config = await self.user_config.find_one({"user_id": user_id})
 
-        if old_config is None:
-            config = {"user_id": user_id, "infraction_points": 0, "infractions": []}
-            old_config = await self.user_config.insert_one(config)
+            if old_config is None:
+                # If there is no old config, insert a new one
+                await self.user_config.insert_one(new_config)
+            else:
+                # Otherwise, replace the old config with the new one
+                _id = old_config["_id"]
+                await self.user_config.replace_one({"_id": _id}, new_config)
 
-        _id = old_config["_id"]
-        await self.user_config.replace_one({"_id": _id}, new_config)
+        except Exception as e:
+            # Log any errors that occur during the update
+            print(f"Error updating user config for user_id {user_id}: {e}")
+            
+    async def add_infraction(self, user_id: int, infraction: Infraction):
+        # Assuming you have a method to get user data
+        user_config = await self.read_user_config(user_id)
+        
+        # Append new infraction to infractions list
+        if "infractions" not in user_config:
+            user_config["infractions"] = []
+        user_config["infractions"].append({
+            "actiontype": infraction.actiontype,
+            "reason": infraction.reason,
+            "moderator": infraction.moderator.id,
+            "actiontime": infraction.actiontime.isoformat(),
+            "duration": infraction.duration,
+            "attachment_url": infraction.attachment_url
+        })
+        
+        # Save user data with updated infractions
+        await self.update_user_config(user_id, user_config)
+
+    async def get_user_infractions(self, user_id: int) -> list:
+        user_config = await self.read_user_config(user_id)
+        infractions = user_config.get("infractions", [])
+        return [Infraction(**infraction) for infraction in infractions]
+
 
     async def read_bot_config(self, name: str):
         return await self.bot_config.find_one({"name": name})
@@ -66,51 +120,35 @@ class BaseDatabase(metaclass=SingletonMeta):
 class ModmailDatabase(BaseDatabase):
     def __init__(self, conf=None):
         super().__init__(conf)
-
     async def get_banned_users(self) -> List[int]:
-        """Return a list of User IDs which are banned from using Modmail"""
-
         modmail_config = await self.read_bot_config("modmail")
         return modmail_config["banned_users"]
 
     async def get_channel(self, user_id: int) -> Optional[int]:
-        """Return modmail thread ID if exists, or else return None"""
-
         user_config = await self.read_user_config(user_id)
         return user_config.get("modmail_id")
 
     async def set_channel(self, user_id: int, thread_id: int) -> None:
-        """Set the modmail thread ID for a particular user"""
-
         user_config = await self.read_user_config(user_id)
         user_config["modmail_id"] = thread_id
         await self.update_user_config(user_id, user_config)
 
     async def unset_channel(self, user_id: int) -> None:
-        """Unset the user's modmail channel"""
-        conf = await self.read_user_config(user_id)
-        del conf["modmail_id"]
-        await self.update_user_config(user_id, conf)
+        user_config = await self.read_user_config(user_id)
+        user_config.pop("modmail_id", None)
+        await self.update_user_config(user_id, user_config)
 
     async def ban_user(self, user_id: int) -> None:
-        """Ban a user from using modmail"""
-
-        modmail_config = await self.read_bot_config("modmail")
-        if user_id in modmail_config["banned_users"]:
-            return
-
-        modmail_config["banned_users"].append(user_id)
-        await self.update_bot_config(modmail_config)
-
-    async def unban_user(self, user_id: int) -> None:
-        """Unban a user from using modmail"""
-
         modmail_config = await self.read_bot_config("modmail")
         if user_id not in modmail_config["banned_users"]:
-            return
+            modmail_config["banned_users"].append(user_id)
+            await self.update_bot_config(modmail_config)
 
-        modmail_config["banned_users"].remove(user_id)
-        await self.update_bot_config(modmail_config)
+    async def unban_user(self, user_id: int) -> None:
+        modmail_config = await self.read_bot_config("modmail")
+        if user_id in modmail_config["banned_users"]:
+            modmail_config["banned_users"].remove(user_id)
+            await self.update_bot_config(modmail_config)
 
 
 class StudyDatabase(BaseDatabase):
@@ -119,34 +157,37 @@ class StudyDatabase(BaseDatabase):
 
     async def set_time(self, user_id: int, study_expires_at: int) -> None:
         """Set the time at which study will expire for a particular user"""
-
+        logger.info(f"Setting study time for user {user_id} to expire at {study_expires_at}")
         user_config = await self.read_user_config(user_id)
         user_config["study_expires_at"] = study_expires_at
-
         await self.update_user_config(user_id, user_config)
+        logger.info(f"Study time set successfully for user {user_id}")
 
     async def get_end_time(self, user_id: int) -> Optional[int]:
         """Get the time at which study expires for a particular user"""
-
         user_config = await self.read_user_config(user_id)
-        return user_config.get("study_expires_at")
+        end_time = user_config.get("study_expires_at")
+        logger.info(f"Retrieved study end time for user {user_id}: {end_time}")
+        return end_time
 
     async def get_all(self) -> dict[int, int]:
         """Return all users with the study role"""
-
-        return {document["user_id"]: document["study_expires_at"]
-                async for document in self.user_config.find({"study_expires_at": {"$exists": True}})}
+        logger.info("Fetching all users with study role")
+        users_with_study_role = {document["user_id"]: document["study_expires_at"]
+                                 async for document in self.user_config.find({"study_expires_at": {"$exists": True}})}
+        logger.info(f"Users fetched: {users_with_study_role}")
+        return users_with_study_role
 
     async def delete_user(self, user_id: int):
         """Remove a studying user from the database"""
-
+        logger.info(f"Deleting study role from user {user_id}")
         user_config = await self.read_user_config(user_id)
-        user_config.pop("study_expires_at")
-
-        try:
+        if "study_expires_at" in user_config:
+            user_config.pop("study_expires_at")
             await self.update_user_config(user_id, user_config)
-        except KeyError:
-            pass
+            logger.info(f"Study role removed for user {user_id}")
+        else:
+            logger.warning(f"No study role found for user {user_id} to remove")
 
 
 class BonkDatabase(BaseDatabase):
@@ -266,6 +307,43 @@ class AppealDatabase(BaseDatabase):
         return [[document["user_id"], document["submission_time"]] for document in self.ban_appeals.find({"decision": None})]
 
 
+class TagsDatabase(BaseDatabase):
+
+    def __init__(self, conf=None):
+        super().__init__(conf)
+
+    async def exists(self, guild_id: int, name: str) -> bool:
+        tag = await self.tags.find_one({"guild_id": guild_id, "name": name})
+        return tag is not None
+
+    async def create(self, guild_id: int, user_id: int, name: str, content: str) -> None:
+        tag_dict = await self.tags.find_one({"guild_id": guild_id, "name": name})
+        if tag_dict is None:
+            tag_dict = {"guild_id": guild_id, "user_id": user_id, "name": name, "content": content}
+            await self.tags.insert_one(tag_dict)
+        else:
+            raise ValueError("Tag with this name already exists.")
+
+    async def delete(self, guild_id: int, name: str) -> None:
+        await self.tags.delete_one({"guild_id": guild_id, "name": name})
+
+    async def update(self, guild_id: int, name: str, new_content: str) -> None:
+        await self.tags.update_one({"guild_id": guild_id, "name": name}, {"$set": {"content": new_content}})
+
+    async def get_all(self, guild_id: int) -> list:
+        tags = await self.tags.find({"guild_id": guild_id}).to_list(length=None)
+        return tags
+
+    async def get_tag(self, guild_id: int, name: str) -> Optional[dict]:
+        tag = await self.tags.find_one({"guild_id": guild_id, "name": name})
+        return tag if tag else None
+
+    async def clear_all_tags(self) -> None:
+        await self.tags.delete_many({})
+
+    async def remove_user_tags(self, user_id: int) -> None:
+        await self.tags.delete_many({"user_id": user_id})
+    
 class RecurrentDatabase(BaseDatabase):
 
     def __init__(self, conf=None):
@@ -352,9 +430,10 @@ class RecurrentDatabase(BaseDatabase):
 """
 class Database:
     def __init__(self, conf: Config) -> None:
-        base_db = BaseDatabase(conf)
-        self.modmail: ModmailDatabase = ModmailDatabase()
+        self.base_db = BaseDatabase(conf)
+        self.modmail: ModmailDatabase = ModmailDatabase(conf)
         self.study: StudyDatabase = StudyDatabase()
         self.bonk: BonkDatabase = BonkDatabase()
         self.appeal: AppealDatabase = AppealDatabase()
         self.recurrent: RecurrentDatabase = RecurrentDatabase()
+        self.tags: TagsDatabase = TagsDatabase()

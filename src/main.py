@@ -31,8 +31,15 @@ bot: APBot = APBot(
 
 cogs: List[str] = [
     "cogs.moderation.commands",  # Updated path to your ModerationCommands cog
+    "cogs.moderation.infraction",
     "cogs.bonk",  # Ensure this is the correct path for any additional cogs
-    "cogs.recurrent" 
+    "cogs.recurrent", 
+    "cogs.tags",
+    "cogs.study",
+    "cogs.errorhandler",
+    "cogs.events",
+    "cogs.modmail",
+    
 ]
 
 @bot.event
@@ -52,12 +59,17 @@ async def startup(conf: Config):
 
     try:
         bot.guild: Guild = await bot.fetch_guild(conf.get("guild_id"))
+        print(f"Fetched guild {bot.guild.name}")
     except Exception as e:
         print(f"Failed to fetch guild\n{type(e).__name__}: {e}")
 
     bot.db.bot_user_id = bot.user.id
 
-    await bot.resync_slash_commands()  # Ensure this is called
+    try:
+        await bot.resync_slash_commands()  # Ensure this is called
+        print("Commands resynced successfully.")
+    except Exception as e:
+        print(f"Failed to resync commands\n{type(e).__name__}: {e}")
 
     bot.owner_ids = bot.config.get("owner_ids", [])
 

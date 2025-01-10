@@ -1,9 +1,6 @@
-import time
-from datetime import datetime, timedelta
-
+import nextcord
 from nextcord import (
     slash_command,
-    message_command,
     Permissions,
     Interaction,
     Embed,
@@ -12,22 +9,36 @@ from nextcord import (
     SlashOption,
     Attachment,
     Forbidden,
-    Message,
     Color,
 )
+
 from nextcord.ext import commands
 import asyncio
-from bot_base import APBot
+from datetime import datetime, timedelta
 from typing import Union, Optional
+from bot_base import APBot
 from cogs.utils import convert_time
 
-from models import Infraction
-
+class Infraction:
+    def __init__(
+        self,
+        actiontype: str,
+        reason: str,
+        moderator: Member,
+        actiontime: datetime,
+        duration: Optional[int] = None,  # Duration in seconds, default is None
+        attachment_url: Optional[str] = None  # URL of any attachments, default is None
+    ):
+        self.actiontype = actiontype
+        self.reason = reason
+        self.moderator = moderator
+        self.actiontime = actiontime
+        self.duration = duration
+        self.attachment_url = attachment_url
 
 class ModerationCommands(commands.Cog):
     def __init__(self, bot: APBot) -> None:
         self.bot = bot
-
 
     @slash_command(
         name="warnchannel",
@@ -39,12 +50,9 @@ class ModerationCommands(commands.Cog):
         inter: Interaction,
         reason: str = SlashOption(description="The reason for the warning", required=False)
     ):
-        """
-        Sends a warning message to a specified channel, disables @everyone's message permissions for 5 minutes,
-        and then sets a 15-second slowmode in the channel.
-        """
         await inter.response.defer(ephemeral=True)
 
+        # Send warning message to the channel
         await inter.channel.send(
             embed=Embed(
                 title="Channel Warn",
@@ -57,42 +65,38 @@ class ModerationCommands(commands.Cog):
         await inter.channel.set_permissions(inter.guild.default_role, send_messages=False)
         await inter.followup.send("Done", ephemeral=True)
 
-        logs_channel: TextChannel = await self.bot.getch_channel(self.bot.config.get("logs_channel"))
-        if logs_channel:
-            await logs_channel.send(embed=Embed(
-                title=f"Channel Warn",
-                description=f"Responsible Mod: {inter.user.mention}\nReason: {reason if reason else 'No Reason Given.'}",
-                color=self.bot.colors.get("light_orange")
-            ))
+        # Send log message to the logs channel
+        logs_channel: Optional[TextChannel] = await self.bot.getch_channel(self.bot.config.get("logs_channel"))
 
-        # Unlock channel, set slowmode, and revert permissions
+        if isinstance(logs_channel, TextChannel):
+            try:
+                await logs_channel.send(embed=Embed(
+                    title=f"Channel Warn",
+                    description=f"Responsible Mod: {inter.user.mention}\nReason: {reason if reason else 'No Reason Given.'}",
+                    color=self.bot.colors.get("light_orange")
+                ).set_footer(text=f"Issued by: {inter.user.display_name} ({inter.user.mention})"))
+            except Forbidden:
+                await inter.followup.send("Failed to send a message to the logs channel. Check the bot's permissions.", ephemeral=True)
+        else:
+            await inter.followup.send("Failed to retrieve logs channel. Check the channel configuration.", ephemeral=True)
+
+        # Unlock channel, set slowmode, and revert permissions after 5 minutes
         await asyncio.sleep(60 * 5)  # Wait for 5 minutes
         await inter.channel.edit(slowmode_delay=15)
         await inter.channel.set_permissions(inter.guild.default_role, send_messages=True)
 
     async def infraction_response(self, member: Member, infraction: Infraction) -> None:
-        match infraction.actiontype:
-            case "warn":
-                color = self.bot.colors.get("yellow")
-                infraction_name = "Warning"
-            case "mute": # /wm (NOT /mute)
-                color = self.bot.colors.get("orange")
-                infraction_name = "Mute"
-            case "pseudo-mute": # /mute (NOT /wm)
-                color = self.bot.colors.get("light_orange")
-                infraction_name = "Mute"
-            case "unmute":
-                color = self.bot.colors.get("green")
-                infraction_name = "Unmute"
-            case "kick":
-                color = self.bot.colors.get("dark_orange")
-                infraction_name = "Kick"
-            case "ban":
-                color = self.bot.colors.get("red")
-                infraction_name = "Ban"
-            case "force-ban":
-                color = self.bot.colors.get("red")
-                infraction_name = "Force-Ban"
+        infraction_details = {
+            "warn": ("Warning", self.bot.colors.get("yellow")),
+            "mute": ("Mute", self.bot.colors.get("orange")),
+            "pseudo-mute": ("Mute", self.bot.colors.get("light_orange")),
+            "unmute": ("Unmute", self.bot.colors.get("green")),
+            "kick": ("Kick", self.bot.colors.get("dark_orange")),
+            "ban": ("Ban", self.bot.colors.get("red")),
+            "force-ban": ("Force-Ban", self.bot.colors.get("red"))
+        }
+
+        infraction_name, color = infraction_details.get(infraction.actiontype, ("Infraction", Color.default()))
 
         infraction_embed = Embed(
             title=f"Infraction: {infraction_name}",
@@ -102,59 +106,76 @@ class ModerationCommands(commands.Cog):
         )
 
         if infraction.duration:
-            mute_end = (infraction.actiontime + timedelta(seconds=infraction.duration)).timestamp()
+            # Correctly calculate the Unix timestamp for unmute time
+            mute_end = int((infraction.actiontime + timedelta(seconds=infraction.duration)).timestamp())
             infraction_embed.add_field(
                 name="Unmute:",
                 value=f"<t:{mute_end}:f> (<t:{mute_end}:R>)",
                 inline=False,
             )
 
+            # Determine infraction points change only for 'mute' action
             if infraction.actiontype == "mute":
-                change = 15 if infraction.duration >= 60 * 60 * 12 else (10 if infraction.duration >= 60 * 60 * 6 else 5)
-                inf_points = await self.bot.db.add_inf_points(member.id, change)
+                # Calculate infraction points based on duration
+                if infraction.duration <= 3 * 3600:  # Up to 3 hours
+                    change = 5
+                elif infraction.duration <= 6 * 3600:  # Up to 6 hours
+                    change = 10
+                elif infraction.duration <= 12 * 3600:  # Up to 12 hours
+                    change = 15
+                elif infraction.duration <= 20 * 3600:  # Up to 20 hours
+                    change = 20
+                else:
+                    change = 0  # If the duration is beyond 20 hours or unrecognized, no points
 
-                infraction_embed.add_field(
-                    name="Infraction Points:",
-                    value=f"`{inf_points}` (+{change} from previous infraction points)",
-                )
+                # Update infraction points in the database
+                inf_points = await self.bot.db.base_db.add_inf_points(member.id, change)
+                
+                # Check if points were correctly updated in the database
+                if inf_points is not None:
+                    infraction_embed.add_field(
+                        name="Infraction Points:",
+                        value=f"`{inf_points}` (+{change} from previous infraction points)",
+                        inline=False
+                    )
+                else:
+                    infraction_embed.add_field(
+                        name="Infraction Points:",
+                        value="Failed to update infraction points in the database.",
+                        inline=False
+                    )
 
         if infraction.attachment_url:
-            infraction_embed.set_image(infraction.attachment_url)
+            infraction_embed.set_image(url=infraction.attachment_url)
 
-        try:
-            await member.send(infraction_embed)
-        except Forbidden:
-            infraction_embed.set_footer(text=f"User ID: {member.id} | Could not DM.")
-
-        infraction_embed.name = (member.display_name,)
-        infraction_embed.icon_url = member.display_avatar.url
+        infraction_embed.set_author(name=member.display_name, icon_url=member.display_avatar.url)
         infraction_embed.add_field(
             name="Responsible Moderator:",
             value=f"{infraction.moderator.display_name} ({infraction.moderator.mention})",
             inline=False,
         )
 
-        logs: TextChannel = await self.bot.getch_channel(self.bot.config.get("logs_channel"))
-        await logs.send(embed=infraction_embed)
+        try:
+            await member.send(embed=infraction_embed)
+        except Forbidden:
+            infraction_embed.set_footer(text=f"User ID: {member.id} | Could not DM.")
 
-        if infraction.actiontype != "pseudo-mute":
-            await self.bot.db.add_infraction(member.id, infraction)
+        logs_channel_name = "logs_channel"
+        logs_channel = nextcord.utils.get(member.guild.text_channels, name=logs_channel_name)
+
+        if logs_channel:
+            try:
+                await logs_channel.send(embed=infraction_embed)
+            except Forbidden:
+                print("Failed to send message to the logs channel. Check bot permissions.")
+        else:
+            print(f"Logs channel with name '{logs_channel_name}' not found. Check channel name and bot permissions.")
 
 
-    @slash_command(
-        name="warn",
-        description="Warn members of rule-breaking behavior.",
-        default_member_permissions=Permissions(moderate_members=True),
-    )
-    async def warn(
-        self,
-        inter: Interaction,
-        member: Member,
-        reason: str = SlashOption(description="Reason for warn", required=True),
-        attachment: Attachment = None,
-    ):
-        await inter.response.defer(ephemeral=True)
-
+            
+    @slash_command(name="warn", description="Warn members of rule-breaking behavior.", default_member_permissions=Permissions(moderate_members=True))
+    async def warn(self, inter: Interaction, member: Member, reason: str = SlashOption(description="Reason for warn", required=True)):
+        # Create the infraction without duration and attachment_url
         warning = Infraction(
             actiontype="warn",
             reason=reason,
@@ -162,12 +183,22 @@ class ModerationCommands(commands.Cog):
             actiontime=datetime.now()
         )
 
-        if attachment:
-            warning.attachment_url = attachment.proxy_url
+        # Add infraction to the database
+        await self.bot.db.base_db.add_infraction(member.id, warning)
 
+        # Send warning embed
+        warn_embed = Embed(
+            title="Member Warned!",
+            description=f"{member.mention} has been warned.\n\n**Reason:**\n{reason}",
+            color=self.bot.colors.get("yellow", Color.yellow()),
+            timestamp=warning.actiontime
+        )
+        warn_embed.set_footer(text=f"{inter.user.display_name} successfully warned.", icon_url=inter.user.display_avatar.url)
+        await inter.response.send_message(embed=warn_embed)
+
+        # Send the infraction response to the logs channel
         await self.infraction_response(member=member, infraction=warning)
 
-        await inter.followup.send(f"`{member.display_name} successfully warned.`", ephemeral=True)
 
     @slash_command(
         name="wm",
@@ -182,8 +213,13 @@ class ModerationCommands(commands.Cog):
         duration: str = SlashOption(name="duration", description="Mute duration. Format: 5h9m2s", required=True),
         attachment: Attachment = None,
     ):
-        duration: Union[str, int] = convert_time(duration)
-        time_until = datetime.timedelta(seconds=duration)
+        duration_seconds: int = convert_time(duration)
+        time_until = timedelta(seconds=duration_seconds)
+        
+        # Acknowledge the interaction quickly
+        await interaction.response.send_message(f"Muting {member.display_name}... This may take a moment.", ephemeral=False)
+
+        # Apply the mute
         await member.timeout(timeout=time_until, reason=reason)
 
         mute = Infraction(
@@ -191,17 +227,28 @@ class ModerationCommands(commands.Cog):
             reason=reason,
             moderator=interaction.user,
             actiontime=datetime.now(),
-            duration=duration,
+            duration=duration_seconds,
             attachment_url=attachment.proxy_url if attachment else None
         )
 
-        await self.infraction_response(
-            member=member, moderator=interaction.user, infraction=mute
+        # Calculate unmute time
+        unmute_time = datetime.now() + timedelta(seconds=duration_seconds)
+
+        # Send the infraction response
+        await self.infraction_response(member=member, infraction=mute)
+
+        # Follow up with a final confirmation
+        mute_embed = Embed(
+            title="Member Muted!",
+            description=f"{member.mention} has been muted.\n\n**Reason:**\n{reason}\n\n**Will be unmuted at:** <t:{int(unmute_time.timestamp())}:f> (<t:{int(unmute_time.timestamp())}:R>)",
+            color=self.bot.colors.get("light_orange", Color.orange()),  # Use your defined color or light orange
+            timestamp=datetime.now()
         )
 
-        await interaction.followup.send(
-            f"`{member.display_name} successfully muted.`", ephemeral=True
-        )
+        mute_embed.set_footer(text=f"Muted by {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
+
+        # Send the embed publicly
+        await interaction.followup.send(embed=mute_embed)
 
     @slash_command(
         name="mute",
@@ -214,31 +261,41 @@ class ModerationCommands(commands.Cog):
         member: Member,
         reason: str,
         duration: str = SlashOption(name="duration", description="Mute duration. Format: 5h9m2s", required=True),
-        attachment: Attachment = None,
     ):
-        duration: Union[str, int] = convert_time(duration)
-        time_until = datetime.timedelta(seconds=duration)
+        duration_seconds: int = convert_time(duration)
+        time_until = timedelta(seconds=duration_seconds)
+
+        # Acknowledge the interaction quickly
+        await interaction.response.send_message(f"Muting {member.display_name}...", ephemeral=False)
+
+        # Apply the mute
         await member.timeout(timeout=time_until, reason=reason)
 
-        mute = {
-            "type": "pseudo-mute",
-            "duration": duration,
-            "reason": reason,
-            "moderator": f"{interaction.user.mention} ({interaction.user.name})",
-            "date": datetime.datetime.now(),
-        }
-
-        if attachment:
-            mute["attachment"] = attachment.proxy_url
-
-        await self.infraction_response(
-            member=member, moderator=interaction.user, infraction=mute
+        mute = Infraction(
+            actiontype="pseudo-mute",
+            reason=reason,
+            moderator=interaction.user,
+            actiontime=datetime.now(),
+            duration=duration_seconds
         )
 
-        await interaction.followup.send(
-            f"`{member.display_name} successfully muted.`", ephemeral=True
+        # Send the infraction response
+        await self.infraction_response(member=member, infraction=mute)
+
+        # Calculate unmute time
+        unmute_time = datetime.now() + timedelta(seconds=duration_seconds)
+
+        # Send embedded message about the mute
+        mute_embed = Embed(
+            title="Member Muted!",
+            description=f"{member.mention} has been muted.\n\n**Reason:**\n{reason}\n\n**Will be unmuted at:** <t:{int(unmute_time.timestamp())}:f> (<t:{int(unmute_time.timestamp())}:R>)",
+            color=self.bot.colors.get("light_orange", Color.orange()),  # Use your defined color or light orange
+            timestamp=datetime.now()
         )
 
+        mute_embed.set_footer(text=f"Muted by {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
+
+        await interaction.followup.send(embed=mute_embed)
     @slash_command(
         name="unmute",
         description="Unmute a member.",
@@ -248,29 +305,38 @@ class ModerationCommands(commands.Cog):
         self,
         interaction: Interaction,
         member: Member,
-        reason: str,
-        attachment: Attachment = None,
+        reason: str = SlashOption(description="Reason for unmute", required=True)
     ):
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=False)  # Make response visible to everyone
+
+        # Remove the timeout (unmute) the member
         await member.timeout(None, reason=reason)
 
-        unmute = {
-            "type": "unmute",
-            "reason": reason,
-            "moderator": f"{interaction.user.mention} ({interaction.user.name})",
-            "date": datetime.datetime.now(),
-        }
-
-        if attachment:
-            unmute["attachment"] = attachment.proxy_url
-
-        await self.interaction_response(
-            member=member, moderator=interaction.user, infraction=unmute
+        # Create an infraction object for logging
+        unmute = Infraction(
+            actiontype="unmute",
+            reason=reason,
+            moderator=interaction.user,
+            actiontime=datetime.now()
         )
 
-        await interaction.followup.send(
-            f"`{member.display_name} successfully unmuted.`", ephemeral=True
+        # Send infraction response to logs channel
+        await self.infraction_response(member=member, infraction=unmute)
+
+        # Create the embed for the unmute message
+        unmute_embed = Embed(
+            title="Member Unmuted!",
+            description=f"{member.mention} has been unmuted.\n\n**Reason:**\n{reason}",
+            color=self.bot.colors.get("green", Color.green()),  # Use your defined color or default green
+            timestamp=unmute.actiontime
         )
+
+        # Set the footer with moderator information
+        unmute_embed.set_footer(text=f"Unmuted by {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
+
+        # Send the embed as a follow-up message
+        await interaction.followup.send(embed=unmute_embed)
+
 
     @slash_command(
         name="kick",
@@ -285,22 +351,20 @@ class ModerationCommands(commands.Cog):
         attachment: Attachment = None,
     ):
         await interaction.response.defer(ephemeral=True)
+        await member.kick(reason=reason)
 
-        kick = {
-            "type": "kick",
-            "reason": reason,
-            "moderator": f"{interaction.user.mention} ({interaction.user.name})",
-            "date": datetime.datetime.now(),
-        }
-
-        if attachment:
-            kick["attachment"] = attachment.proxy_url
-
-        await self.infraction_response(
-            member=member, moderator=interaction.user, infraction=kick
+        kick = Infraction(
+            actiontype="kick",
+            reason=reason,
+            moderator=interaction.user,
+            actiontime=datetime.now(),
+            attachment_url=attachment.proxy_url if attachment else None
         )
 
-        await interaction.guild.kick(member, reason=reason)
+        await self.infraction_response(
+            member=member, infraction=kick
+        )
+
         await interaction.followup.send(
             f"`{member.display_name} successfully kicked.`", ephemeral=True
         )
@@ -318,67 +382,54 @@ class ModerationCommands(commands.Cog):
         attachment: Attachment = None,
     ):
         await interaction.response.defer(ephemeral=True)
+        await member.ban(reason=reason)
 
-        ban = {
-            "type": "ban",
-            "reason": reason,
-            "moderator": f"{interaction.user.mention} ({interaction.user.name})",
-            "date": datetime.datetime.now(),
-        }
-
-        if attachment:
-            ban["attachment"] = attachment.proxy_url
-
-        await self.infraction_response(
-            member=member, moderator=interaction.user, infraction=ban
+        ban = Infraction(
+            actiontype="ban",
+            reason=reason,
+            moderator=interaction.user,
+            actiontime=datetime.now(),
+            attachment_url=attachment.proxy_url if attachment else None
         )
 
-        await interaction.guild.ban(member, reason=reason)
+        await self.infraction_response(
+            member=member, infraction=ban
+        )
+
         await interaction.followup.send(
             f"`{member.display_name} successfully banned.`", ephemeral=True
         )
 
-    @message_command(
-        name="Delete Message",
-        default_member_permissions=Permissions(manage_messages=True),
+    @slash_command(
+        name="force-ban",
+        description="Force-ban members for severe rule-breaking behavior.",
+        default_member_permissions=Permissions(ban_members=True),
     )
-    async def delete(self, interaction: Interaction, message: Message):
+    async def forceban(
+        self,
+        interaction: Interaction,
+        member: Member,
+        reason: str,
+        attachment: Attachment = None,
+    ):
         await interaction.response.defer(ephemeral=True)
-        await message.delete()
+        await member.ban(reason=reason, delete_message_days=7)
 
-        log_embed = (
-            Embed(
-                title="",
-                color=self.bot.colors.get("orange"),
-            )
-            .add_field(name="Message Content:", value=message.content, inline=False)
-            .add_field(
-                name="Message Channel:", value=message.channel.mention, inline=False
-            )
-            .add_field(
-                name="Responsible Moderator:",
-                value=f"{interaction.user.name} ({interaction.user.mention})",
-            )
-            .set_author(
-                name=message.author.name,
-                url=f"discord://-/users/{message.author.id}",
-                icon_url=message.author.avatar.url,
-            )
-            .timestamp(datetime.datetime.now())
+        forceban = Infraction(
+            actiontype="force-ban",
+            reason=reason,
+            moderator=interaction.user,
+            actiontime=datetime.now(),
+            attachment_url=attachment.proxy_url if attachment else None
         )
 
-        if message.attachments:
-            log_embed.set_image(url=message.attachments[0].proxy_url)
-
-        logs: TextChannel = await self.bot.getch_channel(
-            self.bot.config.get("logs_channel")
+        await self.infraction_response(
+            member=member, infraction=forceban
         )
-        await logs.send(embed=log_embed)
 
         await interaction.followup.send(
-            "`Message successfully deleted!`", ephemeral=True
+            f"`{member.display_name} successfully force-banned.`", ephemeral=True
         )
 
-
-async def setup(bot: APBot):
-    bot.add_cog(ModerationCommands(bot))
+async def setup(bot: APBot) -> None:
+    await bot.add_cog(ModerationCommands(bot))

@@ -1,5 +1,6 @@
 import asyncio
 import time
+import nextcord
 from typing import Union
 
 from nextcord import Interaction, SlashOption, slash_command
@@ -8,7 +9,6 @@ from nextcord.ext import commands
 from bot_base import APBot
 from cogs.utils import convert_time
 
-
 class Study(commands.Cog):
     def __init__(self, bot: APBot) -> None:
         self.bot = bot
@@ -16,7 +16,10 @@ class Study(commands.Cog):
     async def remove_study_role(self, user_id: int) -> None:
         try:
             user = await self.bot.getch_member(self.bot.guild.id, user_id)
-            role = await self.bot.getch_role(self.bot.guild.id, self.bot.config.get("study_role_id"))
+            for role in self.bot.guild.roles:
+                if role.name == "Study":
+                    study_role_id = role.id
+            role = await self.bot.getch_role(self.bot.guild.id, study_role_id)
         except:
             return
 
@@ -55,7 +58,9 @@ class Study(commands.Cog):
         await resp.edit("Performing actions...")
         study_end = int(time.time()) + duration
 
-        study_role_id = self.bot.config.get("study_role_id")
+        for role in inter.guild.roles:
+            if role.name == "Study":
+                study_role_id = role.id
 
         if study_role_id in [i.id for i in inter.user.roles]:
             await resp.edit("Removing role...")
@@ -70,7 +75,62 @@ class Study(commands.Cog):
         await resp.edit(
             f"The study role will be removed <t:{study_end}:R> at <t:{study_end}:f>."
         )
+    
+    class ConfirmDeny(nextcord.ui.View):
+        def __init__(self) -> None:
+            super().__init__(timeout=30)
+            self.value = None
 
+        @nextcord.ui.button(label = 'Yes', style=nextcord.ButtonStyle.green)
+        async def remove_role(self, button: nextcord.ui.Button, inter: nextcord.Interaction):
+            self.value = True
+            self.stop()
+
+        @nextcord.ui.button(label = 'No', style=nextcord.ButtonStyle.red)
+        async def dont_remove_role(self, button: nextcord.ui.Button, inter: nextcord.Interaction):
+            self.value = False
+            self.stop()
+
+    @slash_command(name="remove_study_role", description="Allow yourself to view channels once again (remove study role).")
+    async def remove_study(
+        self,
+        inter: Interaction
+    ):
+        """
+        Allow member to remove their study role (if they have it) if they are done with their studying.
+            - Checks first if study role is at all present.
+                - If present, proceed:
+                    - Asks user to confirm the removal of the study role.
+                    - If yes:
+                        - Removes study role from member.
+                        - Remove member's entry from database.
+                        - Allows them to access all channels once again.
+                    - If no, does nothing.
+                    - If button view times out, does nothing as well.
+                - If not, do nothing.
+        """
+
+        await inter.response.defer(ephemeral=True)
+
+        for role in inter.guild.roles:
+            if role.name == "Study":
+                study_role_id = role.id
+
+        if study_role_id not in [i.id for i in inter.user.roles]:
+            return await inter.followup.send("You do not have a study role to remove!")
+
+        view = self.ConfirmDeny()
+
+        resp = await inter.send("Are you sure you want to remove your study role early?", ephemeral=True, view=view)
+
+        await view.wait()
+
+        if view.value:
+            await resp.edit("Removing role...", view=None)
+            await self.remove_study_role(inter.user.id)
+            return await resp.edit("Successfully removed role! You now have access to channels again.", view=None)
+        return await resp.edit("Request cancelled.", view=None)
+    
     @commands.Cog.listener()
     async def on_ready(self) -> None:
         students = await self.bot.db.study.get_all()
