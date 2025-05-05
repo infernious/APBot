@@ -9,17 +9,6 @@ nonessential_textchannels = ["welcome", "general-2", "college", "bot-commands",
                              "post-ap-math", "higher-cs", "higher-other",
                              "aphome-econ", "apresearch", "apart-design"]
 
-subject_channels = [["apgov-us", "aparthistory", "apchem", None],
-                    ["aphug", "apmicro", "apseminar", "apstats"],
-                    ["aplit", "apgov-comp", "apcsa", None],
-                    ["apchinese", "apes", "appsych", None],
-                    ["apeuro", "apush", "apmacro", "apspanish-lit"],
-                    ["apcalc-ab", "apcalc-bc", "apitalian", "apprecalc"],
-                    ["aplang", "apafam-studies", "apphysicsc-mech", "apphysicsc-em"],
-                    ["apfrench", "apwh-modern", "apcsp", "apmusictheory"],
-                    ["apspanish-lang", "apbio", "apjapanese", None],
-                    ["apgerman", "apphysics1", "aplatin", "apphysics2"]]
-
 
 class APChannel:
 
@@ -28,11 +17,10 @@ class APChannel:
         self.guild = guild
 
     def ap_roles(self):
-
         ap_roles = [role for role in self.channel.overwrites if isinstance(role, discord.Role) and
                     ((role.color == discord.Colour.blue() or role.color == discord.Color(0x94dfa2)) or
-                    ("ap " in role.name.lower()) or
-                    (role.name == "Post-AP Math" or role.name == "Higher CS" or role.name == "Higher Other"))]
+                     ("ap " in role.name.lower()) or
+                     (role.name == "Post-AP Math" or role.name == "Higher CS" or role.name == "Higher Other")) and "teacher" not in role.name.lower()]
 
         if not ap_roles:
             ap_roles = [self.guild.default_role]
@@ -40,11 +28,9 @@ class APChannel:
         return ap_roles
 
     def create_embed(self):
-        embed = discord.Embed(title="")
-        return embed
+        return discord.Embed(title="")
 
     async def shutdown(self):
-
         ap_roles = self.ap_roles()
         for role in ap_roles:
             await self.channel.set_permissions(role, read_messages=False)
@@ -57,7 +43,6 @@ class APChannel:
         await self.channel.send(embed=shutdown_embed)
 
     async def open(self):
-
         ap_roles = self.ap_roles()
         for role in ap_roles:
             generals = discord.utils.get(self.guild.categories, name="General Channels")
@@ -80,35 +65,67 @@ class APServer:
         self.guild = guild
 
     async def shutdown(self):
-
+        # Shutdown essential general channels except those to keep open
         for channel_name in essential_generals:
-            channel = APChannel(self.guild, channel_name)
-            await channel.shutdown()
+            if channel_name not in ["ap-exam-announcements-2025", "help-i-cant-see-channels"]:
+                channel = APChannel(self.guild, channel_name)
+                await channel.shutdown()
+        
+        lecture_stages_category = discord.utils.get(self.guild.categories, name="Lecture Stages")
+        if lecture_stages_category:
+            for channel in lecture_stages_category.channels:
+                stage_channel = APChannel(self.guild, channel.name)
+                await stage_channel.shutdown()
 
+
+        # Shutdown subject channels
         ap_channels = discord.utils.get(self.guild.categories, name="Subject Channels")
-        for channel in ap_channels.channels:
-            ap_channel = APChannel(self.guild, channel.name)
-            await ap_channel.shutdown()
+        if ap_channels:
+            for channel in ap_channels.channels:
+                ap_channel = APChannel(self.guild, channel.name)
+                await ap_channel.shutdown()
 
-        subject_channels.pop(0)
-
+        # Shutdown voice channels
         voice_channels = discord.utils.get(self.guild.categories, name="Voice Channels")
-        for channel in voice_channels.channels:
-            voice_channel = APChannel(self.guild, channel.name)
-            await voice_channel.shutdown()
+        if voice_channels:
+            for channel in voice_channels.channels:
+                voice_channel = APChannel(self.guild, channel.name)
+                await voice_channel.shutdown()
 
-        misc_channels = discord.utils.get(self.guild.categories, name="AP 2024 Exam Season")
-        for channel in misc_channels.channels:
-            if not channel.name == "ap-exam-info-2023":
-                misc_channel = APChannel(self.guild, channel.name)
-                await misc_channel.shutdown()
+        # Shutdown other misc channels under AP Season 2025
+        misc_channels = discord.utils.get(self.guild.categories, name="AP Season 2025")
+        if misc_channels:
+            for channel in misc_channels.channels:
+                if channel.name not in ["ap-exam-announcements-2025", "help-i-cant-see-channels"]:
+                    misc_channel = APChannel(self.guild, channel.name)
+                    await misc_channel.shutdown()
 
-    async def open(self):
+        # Shutdown all channels in the Events category
+        events_category = discord.utils.get(self.guild.categories, name="Events")
+        if events_category:
+            for channel in events_category.channels:
+                event_channel = APChannel(self.guild, channel.name)
+                await event_channel.shutdown()
 
+    async def open(self, *indices):
+        subject_channels = [["apbio", "aplatin", "apeuro", "apmicro"],
+                            ["apchem", "aphug", "apgov-us", None],
+                            ["aplit", "apgov-comp", "apcsa", None],
+                            ["apstats", "apjapanese", "apwh-modern", None],
+                            ["apitalian", "apush", "apchinese", "apmacro"],
+                            ["apcalc-ab", "apcalc-bc", "apmusictheory", "apseminar"],
+                            ["apfrench", "apes", "apphysics2", "apprecalc"],
+                            ["aplang", "apgerman", "apphysicsc-mech", None],
+                            ["aparthistory", "apspanish-lang", "apcsp", "apphysicsc-em"],
+                            ["apphysics1", "apspanish-lit", "appsych", None]]
+        # Open essential general channels
         for channel_name in essential_generals:
             channel = APChannel(self.guild, channel_name)
             await channel.open()
 
+        # Open subject channels
+        for index in sorted(indices,  reverse=True):
+            subject_channels.pop(index)
         for testing_day in subject_channels:
             for channel_name in testing_day:
                 if not channel_name:
@@ -116,8 +133,17 @@ class APServer:
                 subject_channel = APChannel(self.guild, channel_name)
                 await subject_channel.open()
 
-        misc_channels = discord.utils.get(self.guild.categories, name="AP 2024 Exam Season")
-        for channel in misc_channels.channels:
-            if not channel.name == "ap-exam-info-2023":
-                misc_channel = APChannel(self.guild, channel.name)
-                await misc_channel.open()
+        lecture_stages_category = discord.utils.get(self.guild.categories, name="Lecture Stages")
+        if lecture_stages_category:
+            for channel in lecture_stages_category.channels:
+                stage_channel = APChannel(self.guild, channel.name)
+                await stage_channel.open()
+
+
+        # Open misc channels under AP Season 2025
+        misc_channels = discord.utils.get(self.guild.categories, name="AP Season 2025")
+        if misc_channels:
+            for channel in misc_channels.channels:
+                if channel.name not in ["ap-exam-announcements-2025", "help-i-cant-see-channels"]:
+                    misc_channel = APChannel(self.guild, channel.name)
+                    await misc_channel.open()
