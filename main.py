@@ -1,3 +1,4 @@
+from dotenv import load_dotenv
 import os
 import json
 import motor.motor_asyncio as motor
@@ -5,13 +6,14 @@ import motor.motor_asyncio as motor
 import discord
 from discord.ext import commands
 
-database_password = os.environ.get("DATABASE_PASSWORD")
+load_dotenv(dotenv_path="./.env") 
+
+database_password = os.getenv("DATABASE_PASSWORD")
 db_client = motor.AsyncIOMotorClient(database_password)
 db = db_client["ap-students"]
 
-config_file = open('config.json')
-config = json.load(config_file)
-
+with open('config.json') as f:
+    config = json.load(f)
 
 class APBot(commands.Bot):
 
@@ -32,6 +34,7 @@ class APBot(commands.Bot):
                               'cogs.modmail',
                               'cogs.rolereact',
                               'cogs.study',
+                              'cogs.exams_automation.day_zero_complete',
                               # 'cogs.threads',
                               ]
         for extension in initial_extensions:
@@ -76,5 +79,5 @@ bot = APBot()
 bot.guild_id = config["guild_id"]
 bot.user_config = db["user_config"]
 
-token = os.environ.get("DISCORD_BOT_SECRET")
-bot.run(token)
+print("TOKEN:", os.getenv("DISCORD_BOT_SECRET"))
+bot.run(os.getenv("DISCORD_BOT_SECRET"))
