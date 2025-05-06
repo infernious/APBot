@@ -5,7 +5,7 @@ red = 0xff0000
 green = 0x00ff00
 
 essential_generals = ['general-1', 'school-advice', 'emotional-support', 'non-ap-help']
-nonessential_textchannels = ["welcome", "general-2", "college", "bot-commands",
+nonessential_textchannels = ["general-2", "college", "bot-commands",
                              "post-ap-math", "higher-cs", "higher-other",
                              "aphome-econ", "apresearch", "apart-design"]
 
@@ -35,12 +35,12 @@ class APChannel:
         for role in ap_roles:
             await self.channel.set_permissions(role, read_messages=False)
 
-        shutdown_embed = self.create_embed()
-        shutdown_embed.colour = red
-        shutdown_embed.add_field(name='', value=f"Shutting down {self.channel.mention}.")
-        shutdown_embed.timestamp = datetime.datetime.now()
-
-        await self.channel.send(embed=shutdown_embed)
+        if isinstance(self.channel, discord.TextChannel):
+            shutdown_embed = self.create_embed()
+            shutdown_embed.colour = red
+            shutdown_embed.add_field(name='', value=f"Shutting down {self.channel.mention}.")
+            shutdown_embed.timestamp = datetime.datetime.now()
+            await self.channel.send(embed=shutdown_embed)
 
     async def open(self):
         ap_roles = self.ap_roles()
@@ -50,14 +50,12 @@ class APChannel:
                 await self.channel.set_permissions(role, read_messages=True)
             else:
                 await self.channel.set_permissions(role, read_messages=None)
-
-        open_embed = self.create_embed()
-        open_embed.colour = green
-        open_embed.add_field(name='', value=f"Reopening {self.channel.mention}.")
-        open_embed.timestamp = datetime.datetime.now()
-
-        await self.channel.send(embed=open_embed)
-
+        if isinstance(self.channel, discord.TextChannel):
+            open_embed = self.create_embed()
+            open_embed.colour = green
+            open_embed.add_field(name='', value=f"Reopening {self.channel.mention}.")
+            open_embed.timestamp = datetime.datetime.now()
+            await self.channel.send(embed=open_embed)
 
 class APServer:
 
