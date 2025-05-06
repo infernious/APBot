@@ -7,7 +7,7 @@ from cogs.exams_automation.models import APChannel, APServer
 red = 0xff0000
 green = 0x00ff00
 
-nonessential_textchannels = ["welcome", "general-2", "college", "bot-commands",
+nonessential_textchannels = ["general-2", "college", "bot-commands",
                              "post-ap-math", "higher-cs", "higher-other",
                              "aphome-econ", "apresearch", "apart-design"]
 
