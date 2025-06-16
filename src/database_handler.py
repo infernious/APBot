@@ -111,10 +111,16 @@ class BaseDatabase(metaclass=SingletonMeta):
         return await self.bot_config.find_one({"name": name})
 
     async def update_bot_config(self, new_config):
-        if "_id" in new_config:
+        # If in the new config has a properly constructed _id, simply replace the old _id with the new one
+        if "_id" in new_config and new_config["_id"]:
             await self.bot_config.replace_one({"_id": new_config["_id"]}, new_config)
+        # Otherwise, insert a properly constructured _id into the passed in new config
         else:
-            raise AttributeError("No _id present in new config.")
+            await self.bot_config.replace_one(
+            {"name": new_config["name"]},
+            new_config,
+            upsert=True
+        )
 
 
 class ModmailDatabase(BaseDatabase):
@@ -122,6 +128,9 @@ class ModmailDatabase(BaseDatabase):
         super().__init__(conf)
     async def get_banned_users(self) -> List[int]:
         modmail_config = await self.read_bot_config("modmail")
+        # Handling the case if no goobers were banned from modmail
+        if not modmail_config:
+            return []
         return modmail_config["banned_users"]
 
     async def get_channel(self, user_id: int) -> Optional[int]:
@@ -138,17 +147,35 @@ class ModmailDatabase(BaseDatabase):
         user_config.pop("modmail_id", None)
         await self.update_user_config(user_id, user_config)
 
-    async def ban_user(self, user_id: int) -> None:
+    async def ban_user(self, user_id: int):
         modmail_config = await self.read_bot_config("modmail")
+        # Handles case when modmail config is none and repalces it with a temporary dict to be properly initalized in update_bot_config
+        if modmail_config is None:
+            modmail_config = {
+                "name": "modmail",
+                "banned_users": []
+            }
         if user_id not in modmail_config["banned_users"]:
             modmail_config["banned_users"].append(user_id)
             await self.update_bot_config(modmail_config)
+            return True # Return true if user was successfully banned from using modmail
+        else:
+            return False # Return false if user was unsuccessfully banned from using modmail
 
-    async def unban_user(self, user_id: int) -> None:
+    async def unban_user(self, user_id: int):
         modmail_config = await self.read_bot_config("modmail")
+        # Handles case when modmail config is none and repalces it with a temporary dict to be properly initalized in update_bot_config
+        if modmail_config is None:
+            modmail_config = {
+                "name": "modmail",
+                "banned_users": []
+            }
         if user_id in modmail_config["banned_users"]:
             modmail_config["banned_users"].remove(user_id)
             await self.update_bot_config(modmail_config)
+            return True # Return true if user was successfully unbanned from using modmail
+        else:
+            return False # Return false if user was unsuccessfully unbanned from using modmail
 
 
 class StudyDatabase(BaseDatabase):
