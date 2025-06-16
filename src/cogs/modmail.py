@@ -80,8 +80,13 @@ class Modmail(commands.Cog):
         user: User = SlashOption(description="User to ban"),
     ) -> None:
         """Bans a user from using modmail."""
-        await self.bot.db.modmail.ban_user(user.id)
-        await inter.response.send_message(f"User {user.mention} has been banned from modmail.", ephemeral=True)
+        banned = await self.bot.db.modmail.ban_user(user.id)
+
+        # Send different messages if user was successfully or unsuccessfully banned from using modmail
+        if (banned):
+            await inter.response.send_message(f"User {user.mention} has been banned from modmail.", ephemeral=True)
+        else:
+            await inter.response.send_message(f"User {user.mention} has already been banned from modmail! Try another user.", ephemeral=True)
 
     @_mm.subcommand(name="unban", description="Unban a user from using modmail")
     @application_checks.has_permissions(moderate_members=True)
@@ -91,8 +96,12 @@ class Modmail(commands.Cog):
         user: User = SlashOption(name="user", description="User to unban", required=True),
     ) -> None:
         """Unbans a user from using modmail."""
-        await self.bot.db.modmail.unban_user(user.id)
-        await inter.response.send_message(f"User {user.mention} has been unbanned from modmail.", ephemeral=True)
+        banned = await self.bot.db.modmail.unban_user(user.id)
+        # Send different messages if user was successfully or unsuccessfully unbanned from using modmail
+        if (banned):
+            await inter.response.send_message(f"User {user.mention} has been unbanned from modmail.", ephemeral=True)
+        else:
+            await inter.response.send_message(f"User {user.mention} can already use modmail! Try another user.", ephemeral=True)
 
     @_mm.subcommand(name="unset_channel", description="Unset the modmail channel for a user (for debugging)")
     @application_checks.has_permissions(moderate_members=True)
@@ -105,75 +114,80 @@ class Modmail(commands.Cog):
         await self.bot.db.modmail.unset_channel(user.id)
         await inter.response.send_message(f"Unset modmail channel for {user.mention}.", ephemeral=True)
 
-@commands.Cog.listener()
-async def on_message(self, message: Message):
-    """Processes incoming modmail messages."""
-    if message.guild or message.author == self.bot.user:
-        return
+    @commands.Cog.listener()
+    async def on_message(self, message: Message):
+        """Processes incoming modmail messages."""
+        if message.guild or message.author == self.bot.user:
+            print("Message is bot.")
+            return
 
-    print(f"Received message from {message.author.id}: {message.content}")  # Debug log
+        print(f"Received message from {message.author.id}: {message.content}")  # Debug log
 
-    try:
-        # Check if user is banned from modmail
-        banned_users = await self.bot.db.modmail.get_banned_users()
-        if message.author.id in banned_users:
+        try:
+            # Check if user is banned from modmail
+            print("Checking if user is banned....")
+            banned_users = await self.bot.db.modmail.get_banned_users()
+            print("Fetched banned users...")
+            if message.author.id in banned_users:
+                print("User is in list of users banned from using modmail")
+                await message.author.send(
+                    embed=Embed(
+                        title="Modmail Restricted",
+                        description="You are banned from using modmail. Contact an admin for further help.",
+                        color=self.bot.colors["red"],
+                    )
+                )
+                return
+
+            print("User is NOT list of users banned from using modmail!")
+            # Ensure the channel ID is correct
+            modmail_channel: ForumChannel = await self.bot.getch_channel(self.bot.config.get("modmail_channel"))
+            print(f"Modmail Channel: {modmail_channel}")  # Debug log
+
+            # Get or create thread for the user
+            thread_id = await self.bot.db.modmail.get_channel(message.author.id)
+            if not thread_id:
+                print(f"Creating new thread for {message.author.id}")  # Debug log
+                thread = await modmail_channel.create_thread(
+                    name=f"{message.author} ({message.author.id})",
+                    content=f"New modmail message from {message.author.mention}",
+                    auto_archive_duration=1440,  # Set archive time for thread (24 hours)
+                    applied_tags=[],  # Add forum-specific tags if needed
+                )
+                await self.bot.db.modmail.set_channel(message.author.id, thread.id)
+            else:
+                thread = await self.bot.getch_channel(thread_id)
+
+            modmail_embed = Embed(
+                title="New Message",
+                description=message.content or "No content",
+                color=self.bot.colors["blue"],
+            ).set_author(name=message.author.name, icon_url=message.author.avatar.url)
+
+            await thread.send(embed=modmail_embed)
+            for attachment in message.attachments:
+                await thread.send(embed=Embed(title="Attachment", color=self.bot.colors["blue"]).set_image(url=attachment.url))
+
+            # Send a confirmation message to the user that their message has been sent
             await message.author.send(
                 embed=Embed(
-                    title="Modmail Restricted",
-                    description="You are banned from using modmail. Contact an admin for further help.",
+                    title="Your message has been sent",
+                    description="Your message has been sent to the mod inbox. We will contact you if needed.",
+                    color=self.bot.colors["green"],
+                )
+            )
+
+            await message.add_reaction("✅")
+
+        except Exception as e:
+            print(f"Error processing modmail message: {e}")
+            await message.author.send(
+                embed=Embed(
+                    title="Error",
+                    description="There was an issue processing your modmail message. Please try again later.",
                     color=self.bot.colors["red"],
                 )
             )
-            return
-
-        # Ensure the channel ID is correct
-        modmail_channel: ForumChannel = await self.bot.getch_channel(self.bot.config.get("modmail_channel"))
-        print(f"Modmail Channel: {modmail_channel}")  # Debug log
-
-        # Get or create thread for the user
-        thread_id = await self.bot.db.modmail.get_channel(message.author.id)
-        if not thread_id:
-            print(f"Creating new thread for {message.author.id}")  # Debug log
-            thread = await modmail_channel.create_thread(
-                name=f"{message.author} ({message.author.id})",
-                content=f"New modmail message from {message.author.mention}",
-                auto_archive_duration=1440,  # Set archive time for thread (24 hours)
-                applied_tags=[],  # Add forum-specific tags if needed
-            )
-            await self.bot.db.modmail.set_channel(message.author.id, thread.id)
-        else:
-            thread = await self.bot.getch_channel(thread_id)
-
-        modmail_embed = Embed(
-            title="New Message",
-            description=message.content or "No content",
-            color=self.bot.colors["blue"],
-        ).set_author(name=message.author.name, icon_url=message.author.avatar.url)
-
-        await thread.send(embed=modmail_embed)
-        for attachment in message.attachments:
-            await thread.send(embed=Embed(title="Attachment", color=self.bot.colors["blue"]).set_image(url=attachment.url))
-
-        # Send a confirmation message to the user that their message has been sent
-        await message.author.send(
-            embed=Embed(
-                title="Your message has been sent",
-                description="Your message has been sent to the mod inbox. We will contact you if needed.",
-                color=self.bot.colors["green"],
-            )
-        )
-
-        await message.add_reaction("✅")
-
-    except Exception as e:
-        print(f"Error processing modmail message: {e}")
-        await message.author.send(
-            embed=Embed(
-                title="Error",
-                description="There was an issue processing your modmail message. Please try again later.",
-                color=self.bot.colors["red"],
-            )
-        )
 
 
 def setup(bot: APBot):

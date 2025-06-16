@@ -51,4 +51,4 @@ class ErrorHandler(commands.Cog):
 
 async def setup(bot: commands.Bot):
     # Use dynamic guilds if needed, or pass an empty list for global cog registration
-    await bot.add_cog(ErrorHandler(bot))
+    bot.add_cog(ErrorHandler(bot))

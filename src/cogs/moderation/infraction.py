@@ -170,4 +170,4 @@ class Infraction(commands.Cog):
 
 
 async def setup(bot: APBot) -> None:
-    await bot.add_cog(Infraction(bot))
+    bot.add_cog(Infraction(bot))
