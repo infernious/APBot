@@ -23,3 +23,6 @@ class BoostTracker(commands.Cog):
             role = discord.utils.get(after.guild.roles, name=role_name)
             if role not in after.roles: continue
             await after.remove_roles(role)
+
+async def setup(bot):
+    await bot.add_cog(BoostTracker(bot), guilds=[discord.Object(id=bot.guild_id)])
