@@ -7,7 +7,7 @@ class BoostTracker(commands.Cog):
     
     @commands.Cog.listener()
     async def on_member_update(self, before, after):
-        if before.premium_since == after.premium_since or after.premium_since:
+        if (before.premium_since is None) == (after.premium_since is None) or after.premium_since:
             return
 
         roles_to_remove = [
