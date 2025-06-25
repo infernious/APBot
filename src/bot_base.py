@@ -101,4 +101,5 @@ class APBot(commands.Bot):
             return None
 
     async def resync_slash_commands(self) -> None:
-        await self.guild.sync_application_commands()
+        await self.guild.sync_application_commands() 
+        

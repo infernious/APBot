@@ -2,7 +2,7 @@ from nextcord import Interaction, SlashOption, slash_command
 from nextcord.ext import commands
 from nextcord.utils import get
 
-class Event(commands.Cog):
+class Events(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
@@ -182,4 +182,4 @@ class Event(commands.Cog):
         print(f"Cog {self.__class__.__name__} is ready.")
 
 def setup(bot):
-    bot.add_cog(Event(bot))
+    bot.add_cog(Events(bot))

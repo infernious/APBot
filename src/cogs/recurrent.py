@@ -1,77 +1,14 @@
-"""
-    @_recurrent.subcommand(name="group", description="Group channels by a name")
-    async def group(self, inter: Interaction, name: str = SlashOption(description="Name of the group", required=True), channel_ids: str = SlashOption(description="Comma-separated list of channel IDs", required=True)):
-        try:
-            await inter.response.defer()
-            channel_ids_list = [int(cid.strip()) for cid in channel_ids.split(',')]
-            await self.bot.db.recurrent.add_group(name, channel_ids_list)
-            await inter.followup.send(f"Channels grouped under '{name}'.")
-        except ValueError:
-            await inter.followup.send("Invalid channel IDs provided. Ensure they are comma-separated integers.")
-        except Exception as e:
-            await inter.followup.send(f"Error grouping channels: {e}")
-
-    @_recurrent.subcommand(name="showgroups", description="Show all channel groups")
-    async def showgroups(self, inter: Interaction):
-        try:
-            await inter.response.defer()
-            groups = await self.bot.db.recurrent.get_groups()
-            if not groups:
-                await inter.followup.send("No groups found.")
-                return
-            group_list = "\n".join([f"{name}: {', '.join([f'<#{cid}>' for cid in channel_ids])}" for name, channel_ids in groups.items()])
-            await inter.followup.send(f"Channel Groups:\n{group_list}")
-        except Exception as e:
-            await inter.followup.send(f"Error retrieving groups: {e}")
-
-
-
-    @_recurrent.subcommand(name="groupmessage", description="Add a recurring message to all channels in a group")
-    async def groupmessage(self, inter: Interaction, group_name: str = SlashOption(description="Name of the group", required=True), message: str = SlashOption(description="Message to send", required=True), limit: int = SlashOption(description="Message count limit before sending a recurring message", required=True)):
-        try:
-            await inter.response.defer()
-            group = await self.bot.db.recurrent.get_group(group_name)
-            if not group:
-                await inter.followup.send(f"Group '{group_name}' not found.")
-                return
-
-            for channel_id in group:
-                await self.bot.db.recurrent.add_message(channel_id, message, limit)
-
-            await inter.followup.send(f"Added recurring message '{message}' to group '{group_name}' with limit {limit}.")
-        except Exception as e:
-            await inter.followup.send(f"Error adding recurring message to group: {e}")
-    @_recurrent.subcommand(name="removegroup", description="Remove a group of channels and their recurring messages by name")
-    async def removegroup(self, inter: Interaction, name: str = SlashOption(description="Name of the group to remove", required=True)):
-        try:
-            await inter.response.defer()
-            group = await self.bot.db.recurrent.get_group(name)
-            if not group:
-                await inter.followup.send(f"Group '{name}' not found.")
-                return
-
-            for channel_id in group:
-                await self.bot.db.recurrent.clear_channel_messages(channel_id)
-            
-            await self.bot.db.recurrent.delete_group(name)
-            await inter.followup.send(f"Group '{name}' and its recurring messages have been removed.")
-        except Exception as e:
-            await inter.followup.send(f"Error removing group: {e}")
-"""
-
-
-
-
-
-
 import nextcord
 from nextcord.ext import commands
 from bot_base import APBot
 from nextcord import Interaction, SelectOption, SlashOption, slash_command, TextInputStyle
 from collections import defaultdict
-from nextcord.ui import Select, View, Modal, TextInput
+from nextcord.ui import Select, View, Modal, TextInput, Button
 from nextcord import Embed 
 import logging
+
+logger = logging.getLogger(__name__)
+
 
 class Recurrent(commands.Cog):
     def __init__(self, bot: APBot):
@@ -83,10 +20,10 @@ class Recurrent(commands.Cog):
 
     @slash_command(name="recurrent", description="Manage recurring messages")
     async def _recurrent(self, inter: Interaction):
-        await inter.response.send_message("Subcommands: /recurrent add, /recurrent clear, /recurrent list, /recurrent remove, /recurrent status, /recurrent group, /recurrent showgroups, /recurrent groupmessage, /recurrent removegroup, /recurrent clear_category", ephemeral=True)
-
+        await inter.response.send_message("Use subcommands to manage recurring messages.", ephemeral=True) 
+        
     @_recurrent.subcommand(name="add", description="Add a recurring message to a channel")
-    async def add(self, inter: Interaction, channel_id: str = SlashOption(description="ID of the channel where the message will be sent", required=True), message: str = SlashOption(description="Message to send", required=True), limit: int = SlashOption(description="Message count limit before sending a recurring message", required=True)):
+    async def _recurrent_add(self, inter: Interaction, channel_id: str = SlashOption(description="ID of the channel where the message will be sent", required=True), message: str = SlashOption(description="Message to send", required=True), limit: int = SlashOption(description="Message count limit before sending a recurring message", required=True)):
         try:
             await inter.response.defer()
             channel_id = int(channel_id)
@@ -94,7 +31,7 @@ class Recurrent(commands.Cog):
             if not channel:
                 await inter.followup.send(f"Channel ID {channel_id} not found.")
                 return
-
+            self.activity_threshold = limit
             await self.bot.db.recurrent.add_message(channel_id, message, limit)
             await inter.followup.send(f"Recurring message added to channel <#{channel_id}> with limit {limit}.")
         except ValueError:
@@ -104,7 +41,7 @@ class Recurrent(commands.Cog):
 
 
     @_recurrent.subcommand(name="list", description="List all recurring messages in a channel")
-    async def list(self, inter: Interaction, channel_id: str = SlashOption(description="ID of the channel to list messages from", required=True)):
+    async def _recurrent_list(self, inter: Interaction, channel_id: str = SlashOption(description="ID of the channel to list messages from", required=True)):
         try:
             await inter.response.defer()
             channel_id = int(channel_id)
@@ -120,7 +57,7 @@ class Recurrent(commands.Cog):
             await inter.followup.send(f"Error listing recurring messages: {e}")
 
     @_recurrent.subcommand(name="remove", description="Remove a recurring message by index")
-    async def remove(self, inter: Interaction, channel_id: str = SlashOption(description="ID of the channel to remove the message from", required=True), index: int = SlashOption(description="Index of the message to remove", required=True)):
+    async def _recurrent_remove(self, inter: Interaction, channel_id: str = SlashOption(description="ID of the channel to remove the message from", required=True), index: int = SlashOption(description="Index of the message to remove", required=True)):
         try:
             await inter.response.defer()
             channel_id = int(channel_id)
@@ -133,33 +70,13 @@ class Recurrent(commands.Cog):
         except ValueError:
             await inter.followup.send("Invalid channel ID or index provided.")
         except Exception as e:
-            await inter.followup.send(f"Error removing recurring message: {e}")
-
-    @_recurrent.subcommand(name="status", description="Show how many times each recurring message has been sent")
-    async def status(self, inter: Interaction, channel_id: str = SlashOption(description="ID of the channel to show status for", required=True)):
-        try:
-            await inter.response.defer()
-            channel_id = int(channel_id)
-            channel_config = await self.bot.db.recurrent.get_channel_config(channel_id)
-            if not channel_config["messages"]:
-                await inter.followup.send(f"No recurring messages found for channel <#{channel_id}>.")
-                return
-            
-            status_list = "\n".join([
-                f"{idx + 1}: {msg} - Sent {channel_config['message_counts'][msg]} times"
-                for idx, msg in enumerate(channel_config["messages"])
-            ])
-            await inter.followup.send(f"Recurring message status for channel <#{channel_id}>:\n{status_list}")
-        except ValueError:
-            await inter.followup.send("Invalid channel ID provided.")
-        except Exception as e:
-            await inter.followup.send(f"Error retrieving message status: {e}")
+            await inter.followup.send(f"Error removing recurring message: {e}") 
 
     @_recurrent.subcommand(
         name="add_category",
-        description="Add a recurring message to a category of channels"
+        description="Add a recurring message to a category of channels with pagination"
     )
-    async def add_category(self, inter: Interaction):
+    async def _recurrent_add_category(self, inter: Interaction):
         class CategorySelect(Select):
             def __init__(self, bot: APBot):
                 options = [
@@ -174,23 +91,21 @@ class Recurrent(commands.Cog):
                 selected_category = next((cat for cat in inter.guild.categories if cat.id == selected_category_id), None)
 
                 if not selected_category:
-                    await select_interaction.response.send_message("Category not found.", ephemeral=False)
+                    await select_interaction.response.send_message("Category not found.", ephemeral=True)
                     return
 
-                # Display a modal to enter the message and limit
                 class MessageLimitModal(Modal):
                     def __init__(self, bot: APBot, selected_category):
                         super().__init__(title="Enter Message and Limit")
                         self.bot = bot
                         self.selected_category = selected_category
 
-                        # Make the message box long
                         self.message_input = TextInput(
                             label="Message to Send",
                             placeholder="Enter the message here...",
                             required=True,
                             max_length=2000,
-                            style=TextInputStyle.paragraph  # Set the style to paragraph for a longer input box
+                            style=TextInputStyle.paragraph
                         )
                         self.add_item(self.message_input)
 
@@ -206,65 +121,105 @@ class Recurrent(commands.Cog):
                         try:
                             limit = int(self.limit_input.value)
                         except ValueError:
-                            await modal_interaction.response.send_message("Invalid limit. Please enter a number.", ephemeral=False)
+                            await modal_interaction.response.send_message("Invalid limit. Please enter a number.", ephemeral=True)
                             return
 
-                        # Step 3: Ask which channels to exclude
-                        class ChannelExcludeSelect(Select):
-                            def __init__(self, bot: APBot, channels, message, limit):
-                                options = [
-                                    SelectOption(label="None of them", value="none")  # Add "None of them" option
-                                ] + [
-                                    SelectOption(label=channel.name, value=str(channel.id))
-                                    for channel in channels
-                                ]
-                                super().__init__(placeholder="Select channels to exclude", min_values=0, max_values=len(options), options=options)
-                                self.bot = bot  # Make sure to store the bot instance
+                        channels = [ch for ch in selected_category.channels if isinstance(ch, nextcord.TextChannel)]
+                        if len(channels) < 25:
+                            await modal_interaction.response.send_message(
+                                f"Category '{selected_category.name}' has fewer than 25 text channels. This action is only for categories with 25+.",
+                                ephemeral=True
+                            )
+                            return
+
+                        pages = [channels[i:i+25] for i in range(0, len(channels), 25)]
+
+                        class ChannelPageView(View):
+                            def __init__(self, bot, pages, message, limit, interaction):
+                                super().__init__(timeout=300)
+                                self.bot = bot
+                                self.pages = pages
+                                self.current_page = 0
                                 self.message = message
                                 self.limit = limit
+                                self.excluded_ids = set()
+                                self.interaction = interaction
+                                self.select = None
+                                self.update_select()
 
-                            async def callback(self, exclude_interaction: Interaction):
-                                # Defer interaction to prevent timeouts
-                                await exclude_interaction.response.defer(ephemeral=False)
+                            def update_select(self):
+                                self.clear_items()
+                                current_channels = self.pages[self.current_page]
+                                options = [
+                                    SelectOption(label=ch.name, value=str(ch.id)) for ch in current_channels
+                                ]
+                                self.select = Select(placeholder="Select channels to exclude", min_values=0, max_values=len(options), options=options)
 
-                                # Check if "None of them" is selected
-                                if "none" in self.values:
-                                    excluded_channels = []  # No channels are excluded
-                                else:
-                                    excluded_channels = [int(channel_id) for channel_id in self.values]
+                                async def select_callback(interaction: Interaction):
+                                    self.excluded_ids.update(map(int, self.select.values))
+                                    await interaction.response.send_message(f"Marked {len(self.select.values)} channel(s) for exclusion.", ephemeral=True)
 
-                                # Add the recurring message to all text channels except the excluded ones
-                                for channel in selected_category.channels:
-                                    if isinstance(channel, nextcord.TextChannel) and channel.id not in excluded_channels:
-                                        await self.bot.db.recurrent.add_message(channel.id, self.message, self.limit)
+                                self.select.callback = select_callback
+                                self.add_item(self.select)
 
-                                await exclude_interaction.followup.send(
-                                    f"Added recurring message to all channels in category '{selected_category.name}' with limit {self.limit}, excluding selected channels.",
-                                    ephemeral=False  # Visible to everyone
-                                )
+                                if self.current_page > 0:
+                                    prev_button = Button(label="Previous", style=nextcord.ButtonStyle.secondary)
 
-                        # Create and send the exclusion select menu
-                        channel_select = ChannelExcludeSelect(self.bot, [ch for ch in selected_category.channels if isinstance(ch, nextcord.TextChannel)], self.message_input.value, limit)
-                        exclusion_view = View(timeout=60)
-                        exclusion_view.add_item(channel_select)
-                        await modal_interaction.response.send_message("Select channels to exclude:", view=exclusion_view, ephemeral=False)  # Visible to everyone
+                                    async def prev_callback(interaction: Interaction):
+                                        self.current_page -= 1
+                                        self.update_select()
+                                        await interaction.message.edit(view=self)
 
-                # Show modal for message and limit input
+                                    prev_button.callback = prev_callback
+                                    self.add_item(prev_button)
+
+                                if self.current_page < len(self.pages) - 1:
+                                    next_button = Button(label="Next", style=nextcord.ButtonStyle.secondary)
+
+                                    async def next_callback(interaction: Interaction):
+                                        self.current_page += 1
+                                        self.update_select()
+                                        await interaction.message.edit(view=self)
+
+                                    next_button.callback = next_callback
+                                    self.add_item(next_button)
+
+                                confirm_button = Button(label="Confirm", style=nextcord.ButtonStyle.success)
+
+                                async def confirm_callback(interaction: Interaction):
+                                    await interaction.response.defer(ephemeral=False)
+                                    all_channels = sum(self.pages, [])
+                                    added = 0
+                                    for ch in all_channels:
+                                        if ch.id in self.excluded_ids:
+                                            continue
+                                        await self.bot.db.recurrent.add_message(ch.id, self.message, self.limit)
+                                        added += 1
+                                    await interaction.followup.send(
+                                        f"Added recurring message to {added} channel(s) in '{selected_category.name}' with limit {self.limit}.",
+                                        ephemeral=False
+                                    )
+
+                                confirm_button.callback = confirm_callback
+                                self.add_item(confirm_button)
+
+                        view = ChannelPageView(self.bot, pages, self.message_input.value, limit, modal_interaction)
+                        await modal_interaction.response.send_message("Select channels to exclude:", view=view, ephemeral=False)
+
                 modal = MessageLimitModal(self.bot, selected_category)
-                await select_interaction.response.send_modal(modal)  # Directly sending modal without any defer
+                await select_interaction.response.send_modal(modal)
 
-        # Create and send the category select menu
         select = CategorySelect(self.bot)
         view = View(timeout=60)
         view.add_item(select)
-        await inter.response.send_message("Please select a category:", view=view, ephemeral=False)  # Visible to everyone
+        await inter.response.send_message("Please select a category:", view=view, ephemeral=False)
 
 
     @_recurrent.subcommand(
         name="remove_category", 
         description="Remove all recurring messages from a category of channels"
     )
-    async def remove_category(self, inter: Interaction):
+    async def _recurrent_remove_category(self, inter: Interaction):
         class CategorySelect(Select):
             def __init__(self, bot: APBot):
                 options = [
@@ -306,28 +261,24 @@ class Recurrent(commands.Cog):
     async def _recurrent_on_message(self, message):
         channel_id = message.channel.id
         channel_config = await self.bot.db.recurrent.get_channel_config(channel_id)
-        
-        if not channel_config["messages"]:
+
+        if not channel_config.get("messages"):
             return
 
         self.message_count_cache[channel_id] += 1
+        limit = max(channel_config.get("limit", 1), 1)
 
-        if self.message_count_cache[channel_id] >= self.activity_threshold:
+        if self.message_count_cache[channel_id] >= limit:
             self.message_count_cache[channel_id] = 0
             for msg in channel_config["messages"]:
                 if channel_config["message_counts"][msg] < channel_config["limit"]:
                     await message.channel.send(embed=Embed(description=msg))
                     channel_config["message_counts"][msg] += 1
-
                     await self.bot.db.recurrent.update_message_count(channel_id, msg, channel_config["message_counts"][msg])
-                    
                     if channel_config["message_counts"][msg] >= channel_config["limit"]:
                         await self.bot.db.recurrent.remove_message(channel_id, msg)
-                    
                     break
 
 
-
-def setup(bot: APBot):
-    bot.add_cog(Recurrent(bot))
-
+async def setup(bot: APBot):
+    await bot.add_cog(Recurrent(bot))

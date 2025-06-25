@@ -432,4 +432,4 @@ class ModerationCommands(commands.Cog):
         )
 
 async def setup(bot: APBot) -> None:
-    await bot.add_cog(ModerationCommands(bot))
+    bot.add_cog(ModerationCommands(bot))

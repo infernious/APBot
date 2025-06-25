@@ -403,31 +403,7 @@ class RecurrentDatabase(BaseDatabase):
         await self.recurrent.update_one({"category_id": category_id}, {"$pull": {"messages": message}, "$unset": {f"message_counts.{message}": ""}})
     async def clear_channel_data(self, channel_id: int) -> None:
         await self.recurrent.delete_one({"channel_id": channel_id})
-"""
-    async def add_group(self, name: str, channel_ids: list) -> None:
-        group_dict = await self.recurrent.find_one({"group_name": name})
-        if group_dict is None:
-            group_dict = {"group_name": name, "channel_ids": channel_ids}
-            await self.recurrent.insert_one(group_dict)
-        else:
-            group_dict["channel_ids"].extend(channel_ids)
-            await self.recurrent.update_one({"group_name": name}, {"$set": {"channel_ids": list(set(group_dict["channel_ids"]))}})
-
-    async def get_groups(self) -> dict:
-        groups = await self.recurrent.find({"group_name": {"$exists": True}}).to_list(length=None)
-        return {group["group_name"]: group["channel_ids"] for group in groups}
-
-    async def get_group(self, name: str) -> list:
-        group_dict = await self.recurrent.find_one({"group_name": name})
-        return group_dict["channel_ids"] if group_dict else []
-
-    async def delete_group(self, name: str) -> None:
-        await self.recurrent.delete_one({"group_name": name})
-
-    async def clear_channel_messages(self, channel_id: int) -> None:
-        await self.recurrent.update_one({"channel_id": channel_id}, {"$set": {"messages": [], "message_counts": {}}})
-
-"""
+        
 class Database:
     def __init__(self, conf: Config) -> None:
         self.base_db = BaseDatabase(conf)

@@ -110,4 +110,3 @@ class Tags(commands.Cog):
 def setup(bot: APBot):
     bot.add_cog(Tags(bot))
 
-

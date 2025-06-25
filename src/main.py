@@ -17,7 +17,7 @@ if not os.path.exists(config_path):
 if os.path.getsize(config_path) == 0:
     raise ValueError(f"Config file is empty: {config_path}")
 
-logging.basicConfig(level=logging.DEBUG)
+# logging.basicConfig(level=logging.DEBUG)
 
 conf = Config(config_path)
 
@@ -30,9 +30,9 @@ bot: APBot = APBot(
 )
 
 cogs: List[str] = [
-    "cogs.moderation.commands",  # Updated path to your ModerationCommands cog
-    "cogs.moderation.infraction",
-    "cogs.bonk",  # Ensure this is the correct path for any additional cogs
+    # "cogs.moderation.commands",  
+    # "cogs.moderation.infraction",
+    "cogs.bonk",  
     "cogs.recurrent", 
     "cogs.tags",
     "cogs.study",
