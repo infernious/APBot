@@ -90,46 +90,6 @@ class Study(commands.Cog):
         async def dont_remove_role(self, button: nextcord.ui.Button, inter: nextcord.Interaction):
             self.value = False
             self.stop()
-
-    @slash_command(name="remove_study_role", description="Allow yourself to view channels once again (remove study role).")
-    async def remove_study(
-        self,
-        inter: Interaction
-    ):
-        """
-        Allow member to remove their study role (if they have it) if they are done with their studying.
-            - Checks first if study role is at all present.
-                - If present, proceed:
-                    - Asks user to confirm the removal of the study role.
-                    - If yes:
-                        - Removes study role from member.
-                        - Remove member's entry from database.
-                        - Allows them to access all channels once again.
-                    - If no, does nothing.
-                    - If button view times out, does nothing as well.
-                - If not, do nothing.
-        """
-
-        await inter.response.defer(ephemeral=True)
-
-        for role in inter.guild.roles:
-            if role.name == "Study":
-                study_role_id = role.id
-
-        if study_role_id not in [i.id for i in inter.user.roles]:
-            return await inter.followup.send("You do not have a study role to remove!")
-
-        view = self.ConfirmDeny()
-
-        resp = await inter.send("Are you sure you want to remove your study role early?", ephemeral=True, view=view)
-
-        await view.wait()
-
-        if view.value:
-            await resp.edit("Removing role...", view=None)
-            await self.remove_study_role(inter.user.id)
-            return await resp.edit("Successfully removed role! You now have access to channels again.", view=None)
-        return await resp.edit("Request cancelled.", view=None)
     
     @commands.Cog.listener()
     async def on_ready(self) -> None:
@@ -142,5 +102,6 @@ class Study(commands.Cog):
                 self.bot.loop.call_later(seconds, asyncio.create_task, self.remove_study_role(user_id))
 
 
-def setup(bot: APBot):
-    bot.add_cog(Study(bot))
+async def setup(bot: APBot):
+    await bot.add_cog(Study(bot))
+    
