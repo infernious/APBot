@@ -280,5 +280,5 @@ class Recurrent(commands.Cog):
                     break
 
 
-async def setup(bot: APBot):
-    await bot.add_cog(Recurrent(bot))
+def setup(bot: APBot):
+    bot.add_cog(Recurrent(bot))

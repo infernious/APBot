@@ -32,12 +32,12 @@ bot: APBot = APBot(
 cogs: List[str] = [
     # "cogs.moderation.commands",  
     # "cogs.moderation.infraction",
-    "cogs.bonk",  
-    "cogs.recurrent", 
-    "cogs.tags",
-    "cogs.study",
+   # "cogs.bonk",  
+   # "cogs.recurrent", 
+ #   "cogs.tags",
+   # "cogs.study",
     "cogs.errorhandler",
-    "cogs.events",
+   # "cogs.events",
     "cogs.modmail",
     
 ]
@@ -58,7 +58,7 @@ async def startup(conf: Config):
     await bot.wait_until_ready()
 
     try:
-        bot.guild: Guild = await bot.fetch_guild(conf.get("guild_id"))
+        bot.guild = await bot.fetch_guild(conf.get("guild_id"))
         print(f"Fetched guild {bot.guild.name}")
     except Exception as e:
         print(f"Failed to fetch guild\n{type(e).__name__}: {e}")

@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 load_dotenv()
 import random
 from datetime import datetime
-
+import asyncio
 from typing import List, Optional, Union
 import time
 import motor.motor_asyncio as motor
@@ -111,44 +111,83 @@ class BaseDatabase(metaclass=SingletonMeta):
         return await self.bot_config.find_one({"name": name})
 
     async def update_bot_config(self, new_config):
-        if "_id" in new_config:
+        # If in the new config has a properly constructed _id, simply replace the old _id with the new one
+        if "_id" in new_config and new_config["_id"]:
             await self.bot_config.replace_one({"_id": new_config["_id"]}, new_config)
+        # Otherwise, insert a properly constructured _id into the passed in new config
         else:
-            raise AttributeError("No _id present in new config.")
-
+            await self.bot_config.replace_one(
+            {"name": new_config["name"]},
+            new_config,
+            upsert=True
+        )
+    async def _read_config_file(self, type_: str, id_: int) -> dict:
+        """Fallback dummy or real method for config reading."""
+        # Example using user_config or a placeholder, depending on your system:
+        if type_ == "channel":
+            return await self.database["channel_config"].find_one({"channel_id": id_}) or {}
+        elif type_ == "user":
+            return await self.read_user_config(id_)
+        return {}
 
 class ModmailDatabase(BaseDatabase):
     def __init__(self, conf=None):
         super().__init__(conf)
+        # Initialize all collections we'll use
+        self.channel_config = self.database["channel_config"]
+        self.user_config = self.database["user_config"]
+        self.bot_config = self.database["bot_config"]
+
     async def get_banned_users(self) -> List[int]:
-        modmail_config = await self.read_bot_config("modmail")
-        return modmail_config["banned_users"]
+        modmail_config = await self.bot_config.find_one({"name": "modmail"})
+        if not modmail_config:
+            return []
+        return modmail_config.get("banned_users", [])
 
     async def get_channel(self, user_id: int) -> Optional[int]:
-        user_config = await self.read_user_config(user_id)
-        return user_config.get("modmail_id")
+        user_config = await self.user_config.find_one({"user_id": user_id})
+        return user_config.get("modmail_id") if user_config else None
 
     async def set_channel(self, user_id: int, thread_id: int) -> None:
-        user_config = await self.read_user_config(user_id)
-        user_config["modmail_id"] = thread_id
-        await self.update_user_config(user_id, user_config)
+        await self.user_config.update_one(
+            {"user_id": user_id},
+            {"$set": {"modmail_id": thread_id}},
+            upsert=True
+        )
 
     async def unset_channel(self, user_id: int) -> None:
-        user_config = await self.read_user_config(user_id)
-        user_config.pop("modmail_id", None)
-        await self.update_user_config(user_id, user_config)
+        await self.user_config.update_one(
+            {"user_id": user_id},
+            {"$unset": {"modmail_id": ""}}
+        )
 
-    async def ban_user(self, user_id: int) -> None:
-        modmail_config = await self.read_bot_config("modmail")
-        if user_id not in modmail_config["banned_users"]:
-            modmail_config["banned_users"].append(user_id)
-            await self.update_bot_config(modmail_config)
+    async def ban_user(self, user_id: int) -> bool:
+        result = await self.bot_config.update_one(
+            {"name": "modmail"},
+            {"$addToSet": {"banned_users": user_id}},
+            upsert=True
+        )
+        return result.modified_count > 0
 
-    async def unban_user(self, user_id: int) -> None:
-        modmail_config = await self.read_bot_config("modmail")
-        if user_id in modmail_config["banned_users"]:
-            modmail_config["banned_users"].remove(user_id)
-            await self.update_bot_config(modmail_config)
+    async def unban_user(self, user_id: int) -> bool:
+        result = await self.bot_config.update_one(
+            {"name": "modmail"},
+            {"$pull": {"banned_users": user_id}}
+        )
+        return result.modified_count > 0
+
+    async def set_user(self, thread_id: int, user_id: int) -> None:
+        await self.channel_config.update_one(
+            {"channel_id": thread_id},
+            {"$set": {"modmail_user_id": user_id}},
+            upsert=True
+        )
+
+    async def get_user(self, thread_id: int) -> Optional[int]:
+        config = await self.channel_config.find_one({"channel_id": thread_id})
+        return config.get("modmail_user_id") if config else None
+
+
 
 
 class StudyDatabase(BaseDatabase):
@@ -403,7 +442,7 @@ class RecurrentDatabase(BaseDatabase):
         await self.recurrent.update_one({"category_id": category_id}, {"$pull": {"messages": message}, "$unset": {f"message_counts.{message}": ""}})
     async def clear_channel_data(self, channel_id: int) -> None:
         await self.recurrent.delete_one({"channel_id": channel_id})
-        
+
 class Database:
     def __init__(self, conf: Config) -> None:
         self.base_db = BaseDatabase(conf)
@@ -412,4 +451,6 @@ class Database:
         self.bonk: BonkDatabase = BonkDatabase()
         self.appeal: AppealDatabase = AppealDatabase()
         self.recurrent: RecurrentDatabase = RecurrentDatabase()
-        self.tags: TagsDatabase = TagsDatabase()
+        self.tags: TagsDatabase = TagsDatabase() 
+        self.config_lock = asyncio.Lock()
+        self.config_data = {} 

@@ -102,6 +102,6 @@ class Study(commands.Cog):
                 self.bot.loop.call_later(seconds, asyncio.create_task, self.remove_study_role(user_id))
 
 
-async def setup(bot: APBot):
-    await bot.add_cog(Study(bot))
+def setup(bot: APBot):
+    bot.add_cog(Study(bot))
     
