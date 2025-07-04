@@ -32,7 +32,7 @@ bot: APBot = APBot(
 cogs: List[str] = [
     # "cogs.moderation.commands",  
     # "cogs.moderation.infraction",
-   # "cogs.bonk",  
+    "cogs.bonk",  
    # "cogs.recurrent", 
  #   "cogs.tags",
    # "cogs.study",

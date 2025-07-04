@@ -155,7 +155,7 @@ class Modmail(commands.Cog):
 
                 if not thread_id:
                     thread = await modmail_channel.create_thread(
-                        name=f"MODMAIL — {message.author.name} [{message.author.id}]",
+                        name=f"MODMAIL ------------------------------ {message.author.name} [{message.author.id}]",
                         content="New modmail started.",
                         auto_archive_duration=1440,
                         applied_tags=[],
@@ -164,15 +164,27 @@ class Modmail(commands.Cog):
                     await self.bot.db.modmail.set_user(thread.id, message.author.id)
                 else:
                     thread = await self.bot.getch_channel(thread_id)
+
+                    expected_name = f"MODMAIL ------------------------------ {message.author.name} [{message.author.id}]"
+
                     if not isinstance(thread, Thread):
+                        # Thread got deleted or is invalid — recreate
                         thread = await modmail_channel.create_thread(
-                            name=f"MODMAIL — {message.author.name} [{message.author.id}]",
+                            name=expected_name,
                             content="Recreated deleted modmail thread.",
                             auto_archive_duration=1440,
                             applied_tags=[],
                         )
                         await self.bot.db.modmail.set_channel(message.author.id, thread.id)
                         await self.bot.db.modmail.set_user(thread.id, message.author.id)
+                    else:
+                        # ✅ Rename the thread if the name doesn't match expected
+                        if thread.name != expected_name:
+                            try:
+                                await thread.edit(name=expected_name)
+                            except Exception as e:
+                                print(f"Could not rename thread: {e}")
+
 
                 # ✅ Format content nicely
                 message_text = message.content or "*No content*"
