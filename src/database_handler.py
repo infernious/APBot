@@ -295,55 +295,66 @@ class AppealDatabase(BaseDatabase):
         if config_from_db is None:
             config_from_db = {
                 "user_id": user_id,
-                "submission_time": datetime.now().timestamp(),
                 "updates": [],
-                "decision": None,
             }
-            await self.ban_appeals.insert_one(config_from_db)
+            insert_result = await self.ban_appeals.insert_one(config_from_db)
+            config_from_db["_id"] = insert_result.inserted_id  # ✅ Ensure _id is present
 
         return config_from_db
 
+
     async def update_appeal(self, user_id: int, new_config):
-        old_config = await self.read_ban_appeal(user_id)
+        old_config = await self.read_appeal(user_id)
         await self.ban_appeals.replace_one({"_id": old_config["_id"]}, new_config)
 
     async def set_submission_time(self, user_id: int, submission_time: int) -> None:
-        """Set the last known appeal submission time. If already set, replace."""
-
-        ban_appeal = await self.read_ban_appeal(user_id)
+        ban_appeal = await self.read_appeal(user_id)
         ban_appeal["submission_time"] = submission_time
-
-        await self.update_ban_appeal(user_id, ban_appeal)
+        await self.update_appeal(user_id, ban_appeal)
 
     async def get_last_appeal(self, user_id: int):
-        """Return last appeal time and decision"""
-        # return a tuple of data: (last_appeal_time, last_appeal_decision)
-        # last_appeal_time: epoch timestamp of last appeal submission. 0 if not exists
-        # last_appeal_decision:
-        #       None: Not Decided Yet
-        #       True: Unbanned
-        #       False: Remains banned
-        ban_appeal = await self.read_ban_appeal(user_id)
-        last_appeal = (ban_appeal["submission_time"], ban_appeal["decision"])
-        return last_appeal
+        ban_appeal = await self.read_appeal(user_id)
+        return (ban_appeal["submission_time"], ban_appeal["decision"])
 
-    async def get_all_pending_decisions(self):
-        """Get all the pending ban appeals"""
-        # return a list like this:
-        # [
-        #     [
-        #         user_id,
-        #         submission_time
-        #         message_time
-        #     ],
-        #     [
-        #         user_id,
-        #         submission_time
-        #         message_time
-        #     ]
-        # ]
+    async def get_pending_decision(self, user_id: int):
+        doc = await self.ban_appeals.find_one({"user_id": user_id, "decision": None})
+        if doc and doc.get("message_id"):
+            return {
+                "submission_time": doc["submission_time"],
+                "message_id": doc["message_id"]
+            }
+        return None
 
-        return [[document["user_id"], document["submission_time"]] for document in self.ban_appeals.find({"decision": None})]
+    async def set_message_id(self, user_id: int, message_id: int) -> None:
+        ban_appeal = await self.read_appeal(user_id)
+        ban_appeal["message_id"] = message_id
+        await self.update_appeal(user_id, ban_appeal) 
+
+    async def get_pending_decisions(self):
+        """
+        Returns a dict of {user_id: (submission_time, message_id)} for all appeals that have no decision.
+        """
+        pending = await self.ban_appeals.find({"decision": None}).to_list(length=None)
+        return {
+            doc["user_id"]: (doc["submission_time"], doc.get("message_id"))
+            for doc in pending if doc.get("message_id") is not None
+        }
+
+    async def set_last_appeal(self, user_id: int, timestamp: float, decision: Optional[bool]) -> None:
+        ban_appeal = await self.read_appeal(user_id)
+        ban_appeal["submission_time"] = timestamp
+        ban_appeal["decision"] = decision
+        await self.update_appeal(user_id, ban_appeal)
+    async def reset_appeal_state(self, user_id: int, submission_time: float, message_id: int) -> None:
+        ban_appeal = await self.read_appeal(user_id)
+        ban_appeal["submission_time"] = submission_time
+        ban_appeal["decision"] = None
+        ban_appeal["message_id"] = message_id
+        await self.update_appeal(user_id, ban_appeal)
+
+
+
+
 
 
 class TagsDatabase(BaseDatabase):
