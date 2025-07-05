@@ -129,6 +129,14 @@ class BaseDatabase(metaclass=SingletonMeta):
         elif type_ == "user":
             return await self.read_user_config(id_)
         return {}
+    async def get_inf_points(self, user_id: int) -> Optional[int]:
+        try:
+            user_config = await self.read_user_config(user_id)
+            return user_config.get("infraction_points", 0)
+        except Exception as e:
+            print(f"Error fetching infraction points for user_id {user_id}: {e}")
+            return None
+
 
 class ModmailDatabase(BaseDatabase):
     def __init__(self, conf=None):

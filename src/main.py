@@ -41,6 +41,7 @@ cogs: List[str] = [
     "cogs.special",  
     "cogs.moderation.appeal",
     "cogs.moderation.errorhandler",
+    "cogs.moderation.commands"
     
 ]
 
