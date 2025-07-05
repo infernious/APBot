@@ -65,25 +65,29 @@ class ModerationCommands(commands.Cog):
         await inter.channel.set_permissions(inter.guild.default_role, send_messages=False)
         await inter.followup.send("Done", ephemeral=True)
 
-        # Send log message to the logs channel
-        logs_channel: Optional[TextChannel] = await self.bot.getch_channel(self.bot.config.get("logs_channel"))
+        # Send log message to the logs channel (by name, not ID)
+        logs_channel: Optional[TextChannel] = nextcord.utils.get(inter.guild.text_channels, name="logs")
 
         if isinstance(logs_channel, TextChannel):
             try:
                 await logs_channel.send(embed=Embed(
-                    title=f"Channel Warn",
-                    description=f"Responsible Mod: {inter.user.mention}\nReason: {reason if reason else 'No Reason Given.'}",
+                    title="Channel Warn",
+                    description=(
+                        f"Responsible Mod: {inter.user.mention}\n"
+                        f"Reason: {reason if reason else 'No Reason Given.'}"
+                    ),
                     color=self.bot.colors.get("light_orange")
                 ).set_footer(text=f"Issued by: {inter.user.display_name} ({inter.user.mention})"))
             except Forbidden:
                 await inter.followup.send("Failed to send a message to the logs channel. Check the bot's permissions.", ephemeral=True)
         else:
-            await inter.followup.send("Failed to retrieve logs channel. Check the channel configuration.", ephemeral=True)
+            await inter.followup.send("Logs channel named `logs` not found in this server.", ephemeral=True)
 
         # Unlock channel, set slowmode, and revert permissions after 5 minutes
         await asyncio.sleep(60 * 5)  # Wait for 5 minutes
         await inter.channel.edit(slowmode_delay=15)
         await inter.channel.set_permissions(inter.guild.default_role, send_messages=True)
+
 
     async def infraction_response(
         self,

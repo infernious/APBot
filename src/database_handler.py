@@ -136,6 +136,13 @@ class BaseDatabase(metaclass=SingletonMeta):
         except Exception as e:
             print(f"Error fetching infraction points for user_id {user_id}: {e}")
             return None
+class InfractionDatabase:
+    def __init__(self, db_connection):
+        self.db = db_connection
+
+    async def get_user_infractions(self, user_id: int):
+        # return a list of Infraction objects (or dicts)
+        ...
 
 
 class ModmailDatabase(BaseDatabase):
@@ -465,6 +472,7 @@ class RecurrentDatabase(BaseDatabase):
 class Database:
     def __init__(self, conf: Config) -> None:
         self.base_db = BaseDatabase(conf)
+        self.infraction : InfractionDatabase = InfractionDatabase(self.base_db)
         self.modmail: ModmailDatabase = ModmailDatabase(conf)
         self.study: StudyDatabase = StudyDatabase()
         self.bonk: BonkDatabase = BonkDatabase()
