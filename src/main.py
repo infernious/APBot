@@ -39,7 +39,8 @@ cogs: List[str] = [
     "cogs.events",
     "cogs.modmail",
     "cogs.special",  
-    "cogs.moderation.appeal"
+    "cogs.moderation.appeal",
+    "cogs.moderation.errorhandler",
     
 ]
 
