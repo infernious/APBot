@@ -36,8 +36,7 @@ cogs: List[str] = [
    # "cogs.recurrent", 
  #   "cogs.tags",
    # "cogs.study",
-    "cogs.errorhandler",
-   # "cogs.events",
+    "cogs.events",
     "cogs.modmail",
     "cogs.special",  
     "cogs.moderation.appeal"
