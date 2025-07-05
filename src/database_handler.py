@@ -2,7 +2,7 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
 import asyncio
 from typing import List, Optional, Union
 import time
@@ -11,10 +11,11 @@ import sqlite3
 from config_handler import Config
 database_client = motor.AsyncIOMotorClient(os.getenv("APBOT_DATABASE_CONNECT_URL"))
 from models import Infraction
-
 import logging
 from typing import Optional
 logger = logging.getLogger(__name__)
+from dateutil import parser
+
 
 class SingletonMeta(type):
     _instances = {}
@@ -37,6 +38,8 @@ class BaseDatabase(metaclass=SingletonMeta):
         self.recurrent = self.database["recurrent"]
         self.tags = self.database["tags"]
         self.conf = conf
+
+
     async def add_inf_points(self, user_id: int, points: int) -> Optional[int]:
         try:
             # Read the current user configuration
@@ -144,7 +147,72 @@ class InfractionDatabase:
         # return a list of Infraction objects (or dicts)
         ...
 
+class DecayDatabase(BaseDatabase):
+    def __init__(self, conf=None):
+        super().__init__(conf)
 
+    async def set_decay_date(self, dt: datetime):
+        await self.bot_config.update_one(
+            {"name": "infraction_decay"},
+            {"$set": {"next_decay": dt.isoformat()}},
+            upsert=True
+        )
+
+    async def get_decay_date(self) -> datetime:
+        config = await self.bot_config.find_one({"name": "infraction_decay"})
+        if config and "next_decay" in config:
+            try:
+                # Replace 'Z' with '+00:00' to handle UTC timezone string
+                decay_str = config["next_decay"].replace("Z", "+00:00")
+                return datetime.fromisoformat(decay_str)
+            except Exception as e:
+                print(f"[DECAY] Error parsing next_decay: {e}")
+                return datetime.utcnow()
+        else:
+            return datetime.utcnow()
+
+    async def remove_one_inf(self) -> Optional[datetime]:
+        try:
+            # Reduce infraction points
+            await self.user_config.update_many(
+                {"infraction_points": {"$gt": 0}},
+                {"$inc": {"infraction_points": -1}}
+            )
+
+            # Calculate new decay date
+            new_decay = datetime.utcnow() + timedelta(days=7)
+
+            # Update bot config
+            await self.bot_config.update_one(
+                {"name": "infraction_decay"},
+                {"$set": {"next_decay": new_decay.isoformat()}},
+                upsert=True
+            )
+
+            return new_decay
+
+        except Exception as e:
+            print(f"[DECAY] Failed to apply decay: {e}")
+            return None
+        
+    async def get_last_decay_date(self) -> Optional[datetime]:
+        config = await self.bot_config.find_one({"name": "infraction_decay"})
+        if config and "last_decay" in config:
+            try:
+                return datetime.fromisoformat(config["last_decay"])
+            except Exception as e:
+                print(f"[DECAY] Error parsing last_decay: {e}")
+        return None
+
+    async def set_last_decay_date(self, time: datetime):
+        await self.bot_config.update_one(
+            {"name": "infraction_decay"},
+            {"$set": {"last_decay": time.isoformat()}},
+            upsert=True
+        )
+
+
+    
 class ModmailDatabase(BaseDatabase):
     def __init__(self, conf=None):
         super().__init__(conf)
@@ -474,6 +542,7 @@ class Database:
         self.base_db = BaseDatabase(conf)
         self.infraction : InfractionDatabase = InfractionDatabase(self.base_db)
         self.modmail: ModmailDatabase = ModmailDatabase(conf)
+        self.decay = DecayDatabase(conf)
         self.study: StudyDatabase = StudyDatabase()
         self.bonk: BonkDatabase = BonkDatabase()
         self.appeal: AppealDatabase = AppealDatabase()

@@ -43,6 +43,7 @@ cogs: List[str] = [
     "cogs.moderation.errorhandler",
     "cogs.moderation.commands",
     "cogs.moderation.infraction",
+    "cogs.moderation.decay",
     
 ]
 
