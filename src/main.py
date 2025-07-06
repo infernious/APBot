@@ -20,13 +20,14 @@ if os.path.getsize(config_path) == 0:
 # logging.basicConfig(level=logging.DEBUG)
 
 conf = Config(config_path)
-
+ 
 bot: APBot = APBot(
     command_prefix=conf.get("command_prefix", "ap:"),
     strip_after_prefix=True,
     intents=Intents.all(),
     activity=Activity(type=ActivityType.playing, name="DM me to contact mods!"),
     default_guild_ids=[conf.get("guild_id")],
+    
 )
 
 cogs: List[str] = [
@@ -44,6 +45,8 @@ cogs: List[str] = [
     "cogs.moderation.commands",
     "cogs.moderation.infraction",
     "cogs.moderation.decay",
+   # "cogs.threads",
+    "cogs.study",
     
 ]
 
