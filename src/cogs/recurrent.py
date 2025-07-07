@@ -34,7 +34,6 @@ class Recurrent(commands.Cog):
         message: str = SlashOption(description="Message to send", required=True),
         limit: int = SlashOption(description="Message count limit before sending a recurring message", required=True),
     ):
-        # ✅ Permission check goes here, inside the function body
         if not self._is_authorized(inter):
             await inter.response.send_message("You do not have permission to use this command.", ephemeral=True)
             return
@@ -49,11 +48,18 @@ class Recurrent(commands.Cog):
 
             self.activity_threshold = limit
             await self.bot.db.recurrent.add_message(channel_id, message, limit)
-            await inter.followup.send(f"Recurring message added to channel <#{channel_id}> with limit {limit}.")
+
+            # ✅ Send the message immediately
+            await channel.send(embed=Embed(description=message))
+
+            await inter.followup.send(
+                f"Recurring message added and message sent immediately to <#{channel_id}> with limit {limit}."
+            )
         except ValueError:
             await inter.followup.send("Invalid channel ID provided.")
         except Exception as e:
             await inter.followup.send(f"Error adding recurring message: {e}")
+
 
 
 
@@ -229,7 +235,12 @@ class Recurrent(commands.Cog):
                                         if ch.id in self.excluded_ids:
                                             continue
                                         await self.bot.db.recurrent.add_message(ch.id, self.message, self.limit)
+                                        try:
+                                            await ch.send(embed=Embed(description=self.message))  # ✅ Send immediately
+                                        except Exception as e:
+                                            logger.warning(f"Failed to send initial message to #{ch.name}: {e}")
                                         added += 1
+
                                     await interaction.followup.send(
                                         f"Added recurring message to {added} channel(s) in '{selected_category.name}' with send interval every {self.limit} messages.",
                                         ephemeral=False
@@ -312,7 +323,7 @@ class Recurrent(commands.Cog):
         limit = max(channel_config.get("limit", 1), 1)
 
         # Increment count of user messages in channel
-        self.message_count_cache[channel_id] += 1
+        self.message_count_cache[channel_id] += 1 
 
         # If count hits limit, send the recurring message and reset counter
         if self.message_count_cache[channel_id] >= limit:
