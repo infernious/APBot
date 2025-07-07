@@ -17,28 +17,34 @@ if not os.path.exists(config_path):
 if os.path.getsize(config_path) == 0:
     raise ValueError(f"Config file is empty: {config_path}")
 
-logging.basicConfig(level=logging.DEBUG)
+# logging.basicConfig(level=logging.DEBUG)
 
 conf = Config(config_path)
-
+ 
 bot: APBot = APBot(
     command_prefix=conf.get("command_prefix", "ap:"),
     strip_after_prefix=True,
     intents=Intents.all(),
     activity=Activity(type=ActivityType.playing, name="DM me to contact mods!"),
     default_guild_ids=[conf.get("guild_id")],
+    
 )
 
 cogs: List[str] = [
-    "cogs.moderation.commands",  # Updated path to your ModerationCommands cog
-    "cogs.moderation.infraction",
-    "cogs.bonk",  # Ensure this is the correct path for any additional cogs
-    "cogs.recurrent", 
-    "cogs.tags",
-    "cogs.study",
-    "cogs.errorhandler",
-    "cogs.events",
-    "cogs.modmail",
+     "cogs.moderation.commands",  
+    # "cogs.moderation.infraction",
+    # "cogs.bonk",  
+    # "cogs.recurrent", 
+    # "cogs.tags",
+    # "cogs.study",
+    # "cogs.events",
+    # "cogs.modmail",
+    # "cogs.special",  
+    # "cogs.moderation.appeal",
+    # "cogs.moderation.errorhandler",
+   # "cogs.moderation.decay",
+   # "cogs.threads",
+    # "cogs.rolereact"
     
 ]
 
@@ -58,7 +64,7 @@ async def startup(conf: Config):
     await bot.wait_until_ready()
 
     try:
-        bot.guild: Guild = await bot.fetch_guild(conf.get("guild_id"))
+        bot.guild = await bot.fetch_guild(conf.get("guild_id"))
         print(f"Fetched guild {bot.guild.name}")
     except Exception as e:
         print(f"Failed to fetch guild\n{type(e).__name__}: {e}")

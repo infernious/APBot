@@ -2,8 +2,8 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 import random
-from datetime import datetime
-
+from datetime import datetime, timedelta
+import asyncio
 from typing import List, Optional, Union
 import time
 import motor.motor_asyncio as motor
@@ -11,10 +11,11 @@ import sqlite3
 from config_handler import Config
 database_client = motor.AsyncIOMotorClient(os.getenv("APBOT_DATABASE_CONNECT_URL"))
 from models import Infraction
-
 import logging
 from typing import Optional
 logger = logging.getLogger(__name__)
+from dateutil import parser
+
 
 class SingletonMeta(type):
     _instances = {}
@@ -37,6 +38,8 @@ class BaseDatabase(metaclass=SingletonMeta):
         self.recurrent = self.database["recurrent"]
         self.tags = self.database["tags"]
         self.conf = conf
+
+
     async def add_inf_points(self, user_id: int, points: int) -> Optional[int]:
         try:
             # Read the current user configuration
@@ -111,44 +114,163 @@ class BaseDatabase(metaclass=SingletonMeta):
         return await self.bot_config.find_one({"name": name})
 
     async def update_bot_config(self, new_config):
-        if "_id" in new_config:
+        # If in the new config has a properly constructed _id, simply replace the old _id with the new one
+        if "_id" in new_config and new_config["_id"]:
             await self.bot_config.replace_one({"_id": new_config["_id"]}, new_config)
+        # Otherwise, insert a properly constructured _id into the passed in new config
         else:
-            raise AttributeError("No _id present in new config.")
+            await self.bot_config.replace_one(
+            {"name": new_config["name"]},
+            new_config,
+            upsert=True
+        )
+    async def _read_config_file(self, type_: str, id_: int) -> dict:
+        """Fallback dummy or real method for config reading."""
+        # Example using user_config or a placeholder, depending on your system:
+        if type_ == "channel":
+            return await self.database["channel_config"].find_one({"channel_id": id_}) or {}
+        elif type_ == "user":
+            return await self.read_user_config(id_)
+        return {}
+    async def get_inf_points(self, user_id: int) -> Optional[int]:
+        try:
+            user_config = await self.read_user_config(user_id)
+            return user_config.get("infraction_points", 0)
+        except Exception as e:
+            print(f"Error fetching infraction points for user_id {user_id}: {e}")
+            return None
+class InfractionDatabase:
+    def __init__(self, db_connection):
+        self.db = db_connection
+
+    async def get_user_infractions(self, user_id: int):
+        # return a list of Infraction objects (or dicts)
+        ...
+
+class DecayDatabase(BaseDatabase):
+    def __init__(self, conf=None):
+        super().__init__(conf)
+
+    async def set_decay_date(self, dt: datetime):
+        await self.bot_config.update_one(
+            {"name": "infraction_decay"},
+            {"$set": {"next_decay": dt.isoformat()}},
+            upsert=True
+        )
+
+    async def get_decay_date(self) -> datetime:
+        config = await self.bot_config.find_one({"name": "infraction_decay"})
+        if config and "next_decay" in config:
+            try:
+                # Replace 'Z' with '+00:00' to handle UTC timezone string
+                decay_str = config["next_decay"].replace("Z", "+00:00")
+                return datetime.fromisoformat(decay_str)
+            except Exception as e:
+                print(f"[DECAY] Error parsing next_decay: {e}")
+                return datetime.utcnow()
+        else:
+            return datetime.utcnow()
+
+    async def remove_one_inf(self) -> Optional[datetime]:
+        try:
+            # Reduce infraction points
+            await self.user_config.update_many(
+                {"infraction_points": {"$gt": 0}},
+                {"$inc": {"infraction_points": -1}}
+            )
+
+            # Calculate new decay date
+            new_decay = datetime.utcnow() + timedelta(days=7)
+
+            # Update bot config
+            await self.bot_config.update_one(
+                {"name": "infraction_decay"},
+                {"$set": {"next_decay": new_decay.isoformat()}},
+                upsert=True
+            )
+
+            return new_decay
+
+        except Exception as e:
+            print(f"[DECAY] Failed to apply decay: {e}")
+            return None
+        
+    async def get_last_decay_date(self) -> Optional[datetime]:
+        config = await self.bot_config.find_one({"name": "infraction_decay"})
+        if config and "last_decay" in config:
+            try:
+                return datetime.fromisoformat(config["last_decay"])
+            except Exception as e:
+                print(f"[DECAY] Error parsing last_decay: {e}")
+        return None
+
+    async def set_last_decay_date(self, time: datetime):
+        await self.bot_config.update_one(
+            {"name": "infraction_decay"},
+            {"$set": {"last_decay": time.isoformat()}},
+            upsert=True
+        )
 
 
+    
 class ModmailDatabase(BaseDatabase):
     def __init__(self, conf=None):
         super().__init__(conf)
+        # Initialize all collections we'll use
+        self.channel_config = self.database["channel_config"]
+        self.user_config = self.database["user_config"]
+        self.bot_config = self.database["bot_config"]
+
     async def get_banned_users(self) -> List[int]:
-        modmail_config = await self.read_bot_config("modmail")
-        return modmail_config["banned_users"]
+        modmail_config = await self.bot_config.find_one({"name": "modmail"})
+        if not modmail_config:
+            return []
+        return modmail_config.get("banned_users", [])
 
     async def get_channel(self, user_id: int) -> Optional[int]:
-        user_config = await self.read_user_config(user_id)
-        return user_config.get("modmail_id")
+        user_config = await self.user_config.find_one({"user_id": user_id})
+        return user_config.get("modmail_id") if user_config else None
 
     async def set_channel(self, user_id: int, thread_id: int) -> None:
-        user_config = await self.read_user_config(user_id)
-        user_config["modmail_id"] = thread_id
-        await self.update_user_config(user_id, user_config)
+        await self.user_config.update_one(
+            {"user_id": user_id},
+            {"$set": {"modmail_id": thread_id}},
+            upsert=True
+        )
 
     async def unset_channel(self, user_id: int) -> None:
-        user_config = await self.read_user_config(user_id)
-        user_config.pop("modmail_id", None)
-        await self.update_user_config(user_id, user_config)
+        await self.user_config.update_one(
+            {"user_id": user_id},
+            {"$unset": {"modmail_id": ""}}
+        )
 
-    async def ban_user(self, user_id: int) -> None:
-        modmail_config = await self.read_bot_config("modmail")
-        if user_id not in modmail_config["banned_users"]:
-            modmail_config["banned_users"].append(user_id)
-            await self.update_bot_config(modmail_config)
+    async def ban_user(self, user_id: int) -> bool:
+        result = await self.bot_config.update_one(
+            {"name": "modmail"},
+            {"$addToSet": {"banned_users": user_id}},
+            upsert=True
+        )
+        return result.modified_count > 0
 
-    async def unban_user(self, user_id: int) -> None:
-        modmail_config = await self.read_bot_config("modmail")
-        if user_id in modmail_config["banned_users"]:
-            modmail_config["banned_users"].remove(user_id)
-            await self.update_bot_config(modmail_config)
+    async def unban_user(self, user_id: int) -> bool:
+        result = await self.bot_config.update_one(
+            {"name": "modmail"},
+            {"$pull": {"banned_users": user_id}}
+        )
+        return result.modified_count > 0
+
+    async def set_user(self, thread_id: int, user_id: int) -> None:
+        await self.channel_config.update_one(
+            {"channel_id": thread_id},
+            {"$set": {"modmail_user_id": user_id}},
+            upsert=True
+        )
+
+    async def get_user(self, thread_id: int) -> Optional[int]:
+        config = await self.channel_config.find_one({"channel_id": thread_id})
+        return config.get("modmail_user_id") if config else None
+
+
 
 
 class StudyDatabase(BaseDatabase):
@@ -256,55 +378,66 @@ class AppealDatabase(BaseDatabase):
         if config_from_db is None:
             config_from_db = {
                 "user_id": user_id,
-                "submission_time": datetime.now().timestamp(),
                 "updates": [],
-                "decision": None,
             }
-            await self.ban_appeals.insert_one(config_from_db)
+            insert_result = await self.ban_appeals.insert_one(config_from_db)
+            config_from_db["_id"] = insert_result.inserted_id  # ✅ Ensure _id is present
 
         return config_from_db
 
+
     async def update_appeal(self, user_id: int, new_config):
-        old_config = await self.read_ban_appeal(user_id)
+        old_config = await self.read_appeal(user_id)
         await self.ban_appeals.replace_one({"_id": old_config["_id"]}, new_config)
 
     async def set_submission_time(self, user_id: int, submission_time: int) -> None:
-        """Set the last known appeal submission time. If already set, replace."""
-
-        ban_appeal = await self.read_ban_appeal(user_id)
+        ban_appeal = await self.read_appeal(user_id)
         ban_appeal["submission_time"] = submission_time
-
-        await self.update_ban_appeal(user_id, ban_appeal)
+        await self.update_appeal(user_id, ban_appeal)
 
     async def get_last_appeal(self, user_id: int):
-        """Return last appeal time and decision"""
-        # return a tuple of data: (last_appeal_time, last_appeal_decision)
-        # last_appeal_time: epoch timestamp of last appeal submission. 0 if not exists
-        # last_appeal_decision:
-        #       None: Not Decided Yet
-        #       True: Unbanned
-        #       False: Remains banned
-        ban_appeal = await self.read_ban_appeal(user_id)
-        last_appeal = (ban_appeal["submission_time"], ban_appeal["decision"])
-        return last_appeal
+        ban_appeal = await self.read_appeal(user_id)
+        return (ban_appeal["submission_time"], ban_appeal["decision"])
 
-    async def get_all_pending_decisions(self):
-        """Get all the pending ban appeals"""
-        # return a list like this:
-        # [
-        #     [
-        #         user_id,
-        #         submission_time
-        #         message_time
-        #     ],
-        #     [
-        #         user_id,
-        #         submission_time
-        #         message_time
-        #     ]
-        # ]
+    async def get_pending_decision(self, user_id: int):
+        doc = await self.ban_appeals.find_one({"user_id": user_id, "decision": None})
+        if doc and doc.get("message_id"):
+            return {
+                "submission_time": doc["submission_time"],
+                "message_id": doc["message_id"]
+            }
+        return None
 
-        return [[document["user_id"], document["submission_time"]] for document in self.ban_appeals.find({"decision": None})]
+    async def set_message_id(self, user_id: int, message_id: int) -> None:
+        ban_appeal = await self.read_appeal(user_id)
+        ban_appeal["message_id"] = message_id
+        await self.update_appeal(user_id, ban_appeal) 
+
+    async def get_pending_decisions(self):
+        """
+        Returns a dict of {user_id: (submission_time, message_id)} for all appeals that have no decision.
+        """
+        pending = await self.ban_appeals.find({"decision": None}).to_list(length=None)
+        return {
+            doc["user_id"]: (doc["submission_time"], doc.get("message_id"))
+            for doc in pending if doc.get("message_id") is not None
+        }
+
+    async def set_last_appeal(self, user_id: int, timestamp: float, decision: Optional[bool]) -> None:
+        ban_appeal = await self.read_appeal(user_id)
+        ban_appeal["submission_time"] = timestamp
+        ban_appeal["decision"] = decision
+        await self.update_appeal(user_id, ban_appeal)
+    async def reset_appeal_state(self, user_id: int, submission_time: float, message_id: int) -> None:
+        ban_appeal = await self.read_appeal(user_id)
+        ban_appeal["submission_time"] = submission_time
+        ban_appeal["decision"] = None
+        ban_appeal["message_id"] = message_id
+        await self.update_appeal(user_id, ban_appeal)
+
+
+
+
 
 
 class TagsDatabase(BaseDatabase):
@@ -403,37 +536,17 @@ class RecurrentDatabase(BaseDatabase):
         await self.recurrent.update_one({"category_id": category_id}, {"$pull": {"messages": message}, "$unset": {f"message_counts.{message}": ""}})
     async def clear_channel_data(self, channel_id: int) -> None:
         await self.recurrent.delete_one({"channel_id": channel_id})
-"""
-    async def add_group(self, name: str, channel_ids: list) -> None:
-        group_dict = await self.recurrent.find_one({"group_name": name})
-        if group_dict is None:
-            group_dict = {"group_name": name, "channel_ids": channel_ids}
-            await self.recurrent.insert_one(group_dict)
-        else:
-            group_dict["channel_ids"].extend(channel_ids)
-            await self.recurrent.update_one({"group_name": name}, {"$set": {"channel_ids": list(set(group_dict["channel_ids"]))}})
 
-    async def get_groups(self) -> dict:
-        groups = await self.recurrent.find({"group_name": {"$exists": True}}).to_list(length=None)
-        return {group["group_name"]: group["channel_ids"] for group in groups}
-
-    async def get_group(self, name: str) -> list:
-        group_dict = await self.recurrent.find_one({"group_name": name})
-        return group_dict["channel_ids"] if group_dict else []
-
-    async def delete_group(self, name: str) -> None:
-        await self.recurrent.delete_one({"group_name": name})
-
-    async def clear_channel_messages(self, channel_id: int) -> None:
-        await self.recurrent.update_one({"channel_id": channel_id}, {"$set": {"messages": [], "message_counts": {}}})
-
-"""
 class Database:
     def __init__(self, conf: Config) -> None:
         self.base_db = BaseDatabase(conf)
+        self.infraction : InfractionDatabase = InfractionDatabase(self.base_db)
         self.modmail: ModmailDatabase = ModmailDatabase(conf)
+        self.decay = DecayDatabase(conf)
         self.study: StudyDatabase = StudyDatabase()
         self.bonk: BonkDatabase = BonkDatabase()
         self.appeal: AppealDatabase = AppealDatabase()
         self.recurrent: RecurrentDatabase = RecurrentDatabase()
-        self.tags: TagsDatabase = TagsDatabase()
+        self.tags: TagsDatabase = TagsDatabase() 
+        self.config_lock = asyncio.Lock()
+        self.config_data = {} 

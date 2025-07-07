@@ -1,9 +1,9 @@
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, List, Union
 
 from nextcord import Member
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 @dataclass
 class Infraction:
@@ -13,3 +13,4 @@ class Infraction:
     actiontime: datetime
     duration: Optional[timedelta]
     attachment_url: Optional[str]
+    update: List[dict] = field(default_factory=list)

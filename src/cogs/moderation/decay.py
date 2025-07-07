@@ -1,6 +1,7 @@
 import asyncio
-import datetime
+from datetime import datetime, timedelta
 
+import nextcord
 from nextcord import Embed
 from nextcord.ext import commands, tasks
 
@@ -12,45 +13,109 @@ class Decay(commands.Cog):
         self.bot = bot
         self.decay.start()
 
-    @tasks.loop(hours=24 * 7)
+    @tasks.loop(hours=24)
     async def decay(self):
-        """
-        Removes 1 infraction point per week of all members.
-            - Runs a MongoDB command if it ought to decay.
-        """
+        now = datetime.utcnow()
+        weekday = now.weekday()  # 0 = Monday
 
-        # attempt to remove one inf point and get next decay date
-        next_decay = await self.bot.db.remove_one_inf()
+        channel = await self.bot.getch_channel(self.bot.config.get("bot_logs_channel"))
+        if not channel:
+            print("[DECAY] Log channel 'bot-logs' not found.")
+            return
 
-        if next_decay:  # removing one inf point was successful, got next decay date
-            emb = Embed(
-                title="Decay Success",
-                description=f"Next decay at <t:{next_decay.timestamp()}:F> <t:{next_decay.timestamp()}:R>",
-                color=self.bot.colors["green"],
-            )
-            content = ""
-        else:  # failed removing one inf point, send error message instead
-            emb = Embed(
-                title="Decay Failure",
-                description="Failed to decay. Please check logs and decay manuallly.",
-                color=self.bot.colors["red"],
-            )
-            # mention bot staff role id if configured, or else 0
-            content = f"<@&{self.bot.config.get('bot_staff_role_id', 0)}>"
+        # Check if decay already applied today
+        last_decay = await self.bot.db.decay.get_last_decay_date()
+        already_ran_today = last_decay and last_decay.date() == now.date()
 
-        # get decay logs channel, or else get logs channel
-        channel = await self.bot.getch_channel(self.bot.config.get("decay_logs_channel", self.bot.config.get("logs_channel")))
-        await channel.send(embed=emb, content=content)
+        if weekday == 0:  # Monday
+            if already_ran_today:
+                status = "True"
+                desc = "Decay already applied earlier today.\n"
+                color = self.bot.colors.get("green", nextcord.Color.green())
+            else:
+                # Apply decay and record timestamp
+                success = await self.bot.db.decay.remove_one_inf()
+                if success:
+                    await self.bot.db.decay.set_last_decay_date(now)
+                    status = "True"
+                    desc = "1 IP removed from members with > 0 IP.\n"
+                    color = self.bot.colors.get("green", nextcord.Color.green())
+                else:
+                    status = "False"
+                    desc = "Decay failed to apply.\n"
+                    color = self.bot.colors.get("red", nextcord.Color.red())
+        else:
+            status = "False"
+            desc = "Decay only applies on Mondays.\n"
+            color = self.bot.colors.get("red", nextcord.Color.red())
+
+        # Calculate next Monday at 6:00 AM UTC
+        days_until_monday = (7 - now.weekday()) % 7
+        days_until_monday = 7 if days_until_monday == 0 else days_until_monday
+        next_monday = (now + timedelta(days=days_until_monday)).replace(hour=6, minute=0, second=0, microsecond=0)
+
+        emb = Embed(
+            title=f"Decay Status: {status}",
+            description=(
+                f"{desc}"
+                f"Next decay at <t:{int(next_monday.timestamp())}:F> "
+                f"<t:{int(next_monday.timestamp())}:R>"
+            ),
+            color=color
+        )
+
+        await channel.send(embed=emb)
 
     @decay.before_loop
     async def decay_before_loop(self):
         await self.bot.wait_until_ready()
 
-        # calculate time till next decay
-        time_diff = (await self.bot.db.get_decay_date() - datetime.datetime.now()).total_seconds()
-        if time_diff > 0:
-            # sleep for duration if decay date has not passed
-            await asyncio.sleep(time_diff)
+        try:
+            now = datetime.utcnow()
+            weekday = now.weekday()
+            channel = nextcord.utils.get(self.bot.get_all_channels(), name="bot-logs")
+            if not channel:
+                print("[DECAY] Log channel 'bot-logs' not found.")
+                return
+
+            last_decay = await self.bot.db.decay.get_last_decay_date()
+            already_ran_today = last_decay and last_decay.date() == now.date()
+
+            if weekday == 0 and not already_ran_today:
+                success = await self.bot.db.decay.remove_one_inf()
+                if success:
+                    await self.bot.db.decay.set_last_decay_date(now)
+                    status = "True"
+                    desc = "1 IP removed from members with > 0 IP."
+                    color = self.bot.colors.get("green", nextcord.Color.green())
+                else:
+                    status = "False"
+                    desc = "Decay failed to apply."
+                    color = self.bot.colors.get("red", nextcord.Color.red())
+            else:
+                status = "False"
+                desc = "Decay only runs on Mondays or already ran today."
+                color = self.bot.colors.get("red", nextcord.Color.red())
+
+            # Calculate next Monday at 6:00 AM UTC
+            days_until_monday = (7 - now.weekday()) % 7
+            days_until_monday = 7 if days_until_monday == 0 else days_until_monday
+            next_monday = (now + timedelta(days=days_until_monday)).replace(hour=6, minute=0, second=0, microsecond=0)
+
+            emb = Embed(
+                title=f"Decay Status: {status}",
+                description=(
+                    f"{desc}\n"
+                    f"Next decay at <t:{int(next_monday.timestamp())}:F> "
+                    f"<t:{int(next_monday.timestamp())}:R>"
+                ),
+                color=color
+            )
+
+            await channel.send(embed=emb)
+
+        except Exception as e:
+            print(f"[DECAY] Failed to initialize decay timing: {e}")
 
 
 def setup(bot: APBot) -> None:
