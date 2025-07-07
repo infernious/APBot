@@ -31,23 +31,20 @@ bot: APBot = APBot(
 )
 
 cogs: List[str] = [
-    # "cogs.moderation.commands",  
+     "cogs.moderation.commands",  
     # "cogs.moderation.infraction",
-  #  "cogs.bonk",  
-     "cogs.recurrent", 
- #   "cogs.tags",
-   # "cogs.study",
-   # "cogs.events",
-  #  "cogs.modmail",
-   # "cogs.special",  
-  #  "cogs.moderation.appeal",
-    "cogs.moderation.errorhandler",
-    "cogs.moderation.commands",
-    "cogs.moderation.infraction",
-    "cogs.moderation.decay",
+    # "cogs.bonk",  
+    # "cogs.recurrent", 
+    # "cogs.tags",
+    # "cogs.study",
+    # "cogs.events",
+    # "cogs.modmail",
+    # "cogs.special",  
+    # "cogs.moderation.appeal",
+    # "cogs.moderation.errorhandler",
+   # "cogs.moderation.decay",
    # "cogs.threads",
-    "cogs.study",
-    "cogs.rolereact"
+    # "cogs.rolereact"
     
 ]
 

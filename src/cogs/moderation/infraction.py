@@ -36,6 +36,7 @@ class Infraction(commands.Cog):
             "ban": self.bot.colors.get("red", Color.red()),
             "force-ban": self.bot.colors.get("red", Color.red()),
             "unmute": self.bot.colors.get("green", Color.green()),
+            "unban": self.bot.colors.get("green", Color.green()),
         }
 
         total = len(infractions)

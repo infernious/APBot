@@ -1,6 +1,6 @@
 import nextcord
 from nextcord import slash_command, Interaction
-from nextcord.ext import commands
+from nextcord.ext import commands, application_checks
 from bot_base import APBot
 blue = 0x00ffff
 
@@ -981,6 +981,7 @@ class RoleReact(commands.Cog):
         self.bot = bot
 
     @slash_command(name="roles_arts", description="Show Arts role buttons")
+    @application_checks.has_role("Admin")
     async def roles_arts(self, interaction: Interaction):
         embed = nextcord.Embed(
             title="Welcome to the server!",
@@ -999,6 +1000,7 @@ class RoleReact(commands.Cog):
 
 
     @slash_command(name="roles_english", description="Show English role buttons")
+    @application_checks.has_role("Admin")
     async def roles_english(self, interaction: Interaction):
         embed = nextcord.Embed(
             title="Welcome to the server!",
@@ -1017,6 +1019,7 @@ class RoleReact(commands.Cog):
 
 
     @slash_command(name="roles_languages", description="Show Languages role buttons")
+    @application_checks.has_role("Admin")
     async def roles_languages(self, interaction: Interaction):
         embed = nextcord.Embed(
             title="Welcome to the server!",
@@ -1035,6 +1038,7 @@ class RoleReact(commands.Cog):
 
 
     @slash_command(name="roles_mathcs", description="Show Math/CS role buttons")
+    @application_checks.has_role("Admin")
     async def roles_mathcs(self, interaction: Interaction):
         embed = nextcord.Embed(
             title="Welcome to the server!",
@@ -1053,6 +1057,7 @@ class RoleReact(commands.Cog):
 
 
     @slash_command(name="roles_sciences", description="Show Sciences role buttons")
+    @application_checks.has_role("Admin")
     async def roles_sciences(self, interaction: Interaction):
         embed = nextcord.Embed(
             title="Welcome to the server!",
@@ -1071,6 +1076,7 @@ class RoleReact(commands.Cog):
 
 
     @slash_command(name="roles_socialstudies", description="Show Social Studies role buttons")
+    @application_checks.has_role("Admin")
     async def roles_socialstudies(self, interaction: Interaction):
         embed = nextcord.Embed(
             title="Welcome to the server!",
@@ -1089,6 +1095,7 @@ class RoleReact(commands.Cog):
 
 
     @slash_command(name="roles_postap", description="Show Post-AP role buttons")
+    @application_checks.has_role("Admin")
     async def roles_postap(self, interaction: Interaction):
         embed = nextcord.Embed(
             title="Welcome to the server!",
@@ -1107,6 +1114,7 @@ class RoleReact(commands.Cog):
 
 
     @slash_command(name="roles_booster", description="Show Booster role buttons")
+    @application_checks.has_role("Admin")
     async def roles_booster(self, interaction: Interaction):
         embed = nextcord.Embed(
             title="Thanks for boosting the server!",
@@ -1126,6 +1134,7 @@ class RoleReact(commands.Cog):
 
 
     @slash_command(name="roles_loungeone", description="Show Lounge One role buttons")
+    @application_checks.has_role("Admin")
     async def roles_loungeone(self, interaction: Interaction):
         embed = nextcord.Embed(
             title="Choose Your Lounge One Roles",
@@ -1139,6 +1148,7 @@ class RoleReact(commands.Cog):
 
 
     @slash_command(name="roles_loungetwo", description="Show Lounge Two role buttons")
+    @application_checks.has_role("Admin")
     async def roles_loungetwo(self, interaction: Interaction):
         embed = nextcord.Embed(
             title="Choose Your Lounge Two Roles",
@@ -1152,6 +1162,7 @@ class RoleReact(commands.Cog):
 
 
     @slash_command(name="roles_loungethree", description="Show Lounge Three role buttons")
+    @application_checks.has_role("Admin")
     async def roles_loungethree(self, interaction: Interaction):
         embed = nextcord.Embed(
             title="Choose Your Lounge Three Roles",

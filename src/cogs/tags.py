@@ -3,7 +3,8 @@ from nextcord import Embed, Interaction, SlashOption, slash_command, Attachment
 from nextcord.ext import commands
 from bot_base import APBot  # Ensure this is imported correctly
 
-REQUIRED_ROLES = {"Honorable", "Staff", "Chat Moderator", "Admin"}
+# Only these roles can run the commands
+REQUIRED_ROLES = {"Honorable", "Chat Moderator", "Admin"}
 
 class Tags(commands.Cog):
     def __init__(self, bot: APBot) -> None:
@@ -15,7 +16,7 @@ class Tags(commands.Cog):
 
     @slash_command(name="tag", description="Manage tags")
     async def _tag(self, inter: Interaction):
-        pass
+        pass  # Root command
 
     @_tag.subcommand(name="create", description="Create a new tag")
     async def _tag_create(
@@ -29,7 +30,7 @@ class Tags(commands.Cog):
 
         content_url = content.url
         if await self.bot.db.tags.exists(inter.guild.id, name):
-            return await inter.send("A tag with this name already exists.", ephemeral=False)
+            return await inter.send("A tag with this name already exists.", ephemeral=True)
 
         await self.bot.db.tags.create(inter.guild.id, inter.user.id, name, content_url)
         await inter.send(f"Tag '{name}' created successfully!", ephemeral=False)
@@ -44,7 +45,7 @@ class Tags(commands.Cog):
             return await inter.send("You don't have permission to use this command.", ephemeral=True)
 
         if not await self.bot.db.tags.exists(inter.guild.id, name):
-            return await inter.send("Tag not found.", ephemeral=False)
+            return await inter.send("Tag not found.", ephemeral=True)
 
         await self.bot.db.tags.delete(inter.guild.id, name)
         await inter.send(f"Tag '{name}' deleted successfully!", ephemeral=False)

@@ -212,11 +212,41 @@ class Events(commands.Cog):
         response = await self.remove_role(inter.user, role_name)
         await inter.response.send_message(response, ephemeral=True)
 
+    @slash_command(name="mc", description="Manage MC role and announcements.")
+    async def mc(self, inter: Interaction):
+        pass
+
+    @mc.subcommand(name="role", description="Toggle MC role.")
+    async def mc_role(self, inter: Interaction):
+        response = await self.toggle_role(inter.user, "MC Role")
+        await inter.response.send_message(response, ephemeral=True)
+
+    @mc.subcommand(name="announce", description="Ping the MC role.")
+    async def mc_announce(self, inter: Interaction):
+        if not any(role.name in ["MC Admin"] for role in inter.user.roles):
+            return await inter.response.send_message(
+                "You do not have permission to use this command.", ephemeral=True
+            )
+
+        if inter.channel and inter.channel.name != "mc-events":
+            return await inter.response.send_message(
+                "This command can only be run in the 'mc-events' channel.", ephemeral=True
+            )
+
+        view = ConfirmPingView(inter, "MC Role", "mc-events", "MC events")
+
+        await inter.response.send_message(
+            "Please confirm that you would like to ping the MC role in the mc-events channel.",
+            view=view,
+            ephemeral=False,
+        )
+
     @commands.Cog.listener()
     async def on_ready(self):
         self.bot.add_view(RoleSubscribeView("Lounge: Events", "events"))
         self.bot.add_view(RoleSubscribeView("qotd", "qotd"))
         self.bot.add_view(RoleSubscribeView("qotd-poll", "qotd-poll"))
+        self.bot.add_view(RoleSubscribeView("MC Role", "MC events"))
         print(f"Cog {self.__class__.__name__} is ready.")
 
 

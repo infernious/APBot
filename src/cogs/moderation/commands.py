@@ -103,6 +103,7 @@ class ModerationCommands(commands.Cog):
             "kick": ("Kick", self.bot.colors.get("dark_orange")),
             "ban": ("Ban", self.bot.colors.get("red")),
             "force-ban": ("Force-Ban", self.bot.colors.get("red")),
+            "unban": ("unban", self.bot.colors.get("green")),
         }
 
         infraction_name, color = infraction_details.get(infraction.actiontype, ("Infraction", nextcord.Color.default()))
@@ -181,6 +182,11 @@ class ModerationCommands(commands.Cog):
             log_embed.add_field(
                 name="Responsible Moderator:",
                 value=f"{infraction.moderator.display_name} ({infraction.moderator.mention})",
+                inline=False,
+            )
+            log_embed.add_field(
+                name="User ID:",
+                value=f"<@{member.id}> (`{member.id}`)",  # This will ping the user and show their ID in code format
                 inline=False,
             )
             try:
@@ -499,9 +505,61 @@ class ModerationCommands(commands.Cog):
             embed.set_image(url=attachment.proxy_url)
 
         embed.set_footer(text=f"Force-banned by {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
+        await interaction.followup.send(embed=embed) 
+
+
+
+    @slash_command(
+        name="unban",
+        description="Unban a previously banned user by ID or mention.",
+        default_member_permissions=Permissions(ban_members=True),
+    )
+    async def unban(
+        self,
+        interaction: Interaction,
+        user: Union[Member, nextcord.User],
+        reason: str = SlashOption(description="Reason for unban", required=True)
+    ):
+        await interaction.response.defer(ephemeral=False)
+
+        # Attempt to unban the user
+        try:
+            await interaction.guild.unban(user, reason=reason)
+        except nextcord.NotFound:
+            await interaction.followup.send(
+                f"❌ User `{user}` is not banned or the ID is incorrect.",
+                ephemeral=True
+            )
+            return
+        except nextcord.Forbidden:
+            await interaction.followup.send(
+                "❌ I do not have permission to unban this user.",
+                ephemeral=True
+            )
+            return
+
+        # Create an Infraction instance for logging
+        unban = Infraction(
+            actiontype="unban",  # Technically it's an "unban", but for consistency in your embed logic
+            reason=reason,
+            moderator=interaction.user,
+            actiontime=datetime.now()
+        )
+
+        # Send the infraction log to logs channel
+        await self.infraction_response(interaction, member=user, infraction=unban)
+
+        # Prepare confirmation embed
+        embed = Embed(
+            title="Member Unbanned!",
+            description=f"{user.mention} has been unbanned.\n\n**Reason:**\n{reason}",
+            color=self.bot.colors.get("green", Color.green()),
+            timestamp=datetime.now()
+        )
+
+        embed.set_footer(text=f"Unbanned by {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
+
         await interaction.followup.send(embed=embed)
-
-
 
 
 

@@ -16,11 +16,12 @@ from nextcord import (
     slash_command,
     ButtonStyle,
 )
-from nextcord.ext import commands, application_checks
+from nextcord.ext import commands
 from nextcord.ui import View, button
 
 from bot_base import APBot
 
+REQUIRED_ROLES = {"Trial Chat Moderator", "Chat Moderator", "Admin"}
 
 class ConfirmView(View):
     def __init__(self, author, on_confirm):
@@ -52,6 +53,9 @@ class Modmail(commands.Cog):
     def __init__(self, bot: APBot) -> None:
         self.bot = bot
 
+    def _has_required_role(self, inter: Interaction) -> bool:
+        return any(role.name in REQUIRED_ROLES for role in inter.user.roles)
+
     async def notify_user(self, user_id: int, message: str, attachment_url: str = None) -> None:
         user = await self.bot.getch_user(user_id)
         if not user:
@@ -66,7 +70,6 @@ class Modmail(commands.Cog):
         ...
 
     @_mm.subcommand(name="send", description="Send a message to the user through modmail")
-    @application_checks.has_permissions(moderate_members=True)
     async def _mm_send(
         self,
         inter: Interaction,
@@ -74,16 +77,18 @@ class Modmail(commands.Cog):
         attachment: Attachment = SlashOption(description="Attachment to include", required=False),
         user: User = SlashOption(description="User to send to (required outside thread)", required=False),
     ) -> None:
+        if not self._has_required_role(inter):
+            return await inter.send("You don't have permission to use this command.", ephemeral=True)
+
         if not message and not attachment:
             return await inter.send("You must provide a message or attachment.", ephemeral=True)
 
         if isinstance(inter.channel, Thread) and inter.channel.parent_id == self.bot.config.get("modmail_channel"):
             user_id = await self.bot.db.modmail.get_user(inter.channel.id)
             if not user_id:
-                # Try to get user ID from thread name as fallback
                 try:
                     user_id = int(inter.channel.name.split('[')[-1].rstrip(']'))
-                    await self.bot.db.modmail.set_user(inter.channel.id, user_id)  # Store for future
+                    await self.bot.db.modmail.set_user(inter.channel.id, user_id)
                 except (ValueError, IndexError, AttributeError):
                     return await inter.send("Could not find the user associated with this thread.", ephemeral=True)
         elif user:
@@ -107,12 +112,14 @@ class Modmail(commands.Cog):
         await inter.response.send_message(embed=response_embed)
 
     @_mm.subcommand(name="ban", description="Ban a user from using modmail")
-    @application_checks.has_permissions(moderate_members=True)
     async def _mm_ban(
         self,
         inter: Interaction,
         user: User = SlashOption(description="User to ban"),
     ) -> None:
+        if not self._has_required_role(inter):
+            return await inter.send("You don't have permission to use this command.", ephemeral=True)
+
         banned = await self.bot.db.modmail.ban_user(user.id)
         if banned:
             await inter.response.send_message(f"{user.mention} has been banned from modmail.", ephemeral=True)
@@ -120,12 +127,14 @@ class Modmail(commands.Cog):
             await inter.response.send_message(f"{user.mention} is already banned from modmail.", ephemeral=True)
 
     @_mm.subcommand(name="unban", description="Unban a user from using modmail")
-    @application_checks.has_permissions(moderate_members=True)
     async def _mm_unban(
         self,
         inter: Interaction,
         user: User = SlashOption(name="user", description="User to unban", required=True),
     ) -> None:
+        if not self._has_required_role(inter):
+            return await inter.send("You don't have permission to use this command.", ephemeral=True)
+
         unbanned = await self.bot.db.modmail.unban_user(user.id)
         if unbanned:
             await inter.response.send_message(f"{user.mention} has been unbanned from modmail.", ephemeral=True)
@@ -164,11 +173,9 @@ class Modmail(commands.Cog):
                     await self.bot.db.modmail.set_user(thread.id, message.author.id)
                 else:
                     thread = await self.bot.getch_channel(thread_id)
-
                     expected_name = f"MODMAIL ------------------------------ {message.author.name} [{message.author.id}]"
 
                     if not isinstance(thread, Thread):
-                        # Thread got deleted or is invalid — recreate
                         thread = await modmail_channel.create_thread(
                             name=expected_name,
                             content="Recreated deleted modmail thread.",
@@ -178,15 +185,12 @@ class Modmail(commands.Cog):
                         await self.bot.db.modmail.set_channel(message.author.id, thread.id)
                         await self.bot.db.modmail.set_user(thread.id, message.author.id)
                     else:
-                        # ✅ Rename the thread if the name doesn't match expected
                         if thread.name != expected_name:
                             try:
                                 await thread.edit(name=expected_name)
                             except Exception as e:
                                 print(f"Could not rename thread: {e}")
 
-
-                # ✅ Format content nicely
                 message_text = message.content or "*No content*"
                 visual_mention = f"• {message.author.mention}"
 
@@ -199,14 +203,8 @@ class Modmail(commands.Cog):
                 embed.set_author(name=str(message.author), icon_url=message.author.display_avatar.url)
                 embed.set_footer(text=f"User ID: {message.author.id}")
 
-                # ✅ Prepare attachments
                 files = [await attachment.to_file() for attachment in message.attachments]
-
-                # ✅ Send the final message to the thread
                 await thread.send(embed=embed, files=files)
-
-
-
 
             confirm_embed = Embed(
                 title="Confirm Message to Mods",
