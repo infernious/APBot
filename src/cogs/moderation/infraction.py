@@ -60,7 +60,7 @@ class Infraction(commands.Cog):
             timestamp = (
                 f"Yesterday at {time.strftime('%I:%M %p').lstrip('0')}"
                 if (datetime.now() - time).days < 1
-                else time.strftime("%-m/%-d/%Y %-I:%M %p").replace(" 0", "")
+                else f"{time.month}/{time.day}/{time.year} {time.strftime('%I:%M %p').lstrip('0')}"
             )
 
             # Handle duration safely
