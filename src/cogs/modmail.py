@@ -162,9 +162,11 @@ class Modmail(commands.Cog):
                 modmail_channel: ForumChannel = await self.bot.getch_channel(self.bot.config.get("modmail_channel"))
                 thread_id = await self.bot.db.modmail.get_channel(message.author.id)
 
+                expected_name = f"MODMAIL ------------------------------ {message.author.name} [{message.author.id}]"
+
                 if not thread_id:
                     thread = await modmail_channel.create_thread(
-                        name=f"MODMAIL ------------------------------ {message.author.name} [{message.author.id}]",
+                        name=expected_name,
                         content="New modmail started.",
                         auto_archive_duration=1440,
                         applied_tags=[],
@@ -173,8 +175,6 @@ class Modmail(commands.Cog):
                     await self.bot.db.modmail.set_user(thread.id, message.author.id)
                 else:
                     thread = await self.bot.getch_channel(thread_id)
-                    expected_name = f"MODMAIL ------------------------------ {message.author.name} [{message.author.id}]"
-
                     if not isinstance(thread, Thread):
                         thread = await modmail_channel.create_thread(
                             name=expected_name,
@@ -185,6 +185,7 @@ class Modmail(commands.Cog):
                         await self.bot.db.modmail.set_channel(message.author.id, thread.id)
                         await self.bot.db.modmail.set_user(thread.id, message.author.id)
                     else:
+                        # ✅ Always attempt to correct the thread name
                         if thread.name != expected_name:
                             try:
                                 await thread.edit(name=expected_name)
