@@ -45,6 +45,7 @@ cogs: List[str] = [
      "cogs.moderation.decay",
    # "cogs.threads",
      "cogs.rolereact"
+     "cogs.logs"
     
 ]
 
