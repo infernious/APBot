@@ -1,3 +1,4 @@
+import nextcord
 from nextcord import Embed, Message, Object, errors, ui, TextInputStyle, Interaction, ButtonStyle, slash_command
 from nextcord.ext import commands, application_checks
 from typing import Optional
@@ -114,13 +115,39 @@ class BanAppealModal(ui.Modal):
         try:
             await self.bot.guild.fetch_member(inter.user.id)
             return await inter.followup.send("You are not banned from the main server.", ephemeral=True)
-        except errors.NotFound:
+        except nextcord.errors.NotFound:
             pass
 
-        ch = await self.bot.getch_channel(self.bot.config.get("appeals_channel_id"))
-        now = datetime.now()
+        now = time.time()
 
-        emb = Embed(title="Ban Appeal", color=self.bot.colors["light_orange"], timestamp=now)
+        # Check if already has an active appeal
+        pending_entry = await self.bot.db.appeal.get_pending_decision(inter.user.id)
+        if pending_entry:
+            channel = await self.bot.getch_channel(self.bot.config.get("appeals_channel_id"))
+            try:
+                await channel.fetch_message(pending_entry["message_id"])
+                return await inter.followup.send("Your last appeal is still being considered.", ephemeral=True)
+            except nextcord.errors.NotFound:
+                await self.bot.db.appeal.clear_last_appeal(inter.user.id)
+
+        # Check re-appeal cooldown
+        last_appeal_time, decision = await self.bot.db.appeal.get_last_appeal(inter.user.id)
+        if last_appeal_time and decision is False:
+            time_since_last = now - last_appeal_time
+            if time_since_last < REAPPEAL_DELAY_SECONDS:
+                seconds_left = int(REAPPEAL_DELAY_SECONDS - time_since_last)
+                days, seconds = divmod(seconds_left, 86400)
+                hours, seconds = divmod(seconds, 3600)
+                minutes, seconds = divmod(seconds, 60)
+                return await inter.followup.send(
+                    f"Your appeal was reviewed and denied. You may appeal again after {days} day(s), {hours} hour(s), {minutes} minute(s), {seconds} second(s).",
+                    ephemeral=True
+                )
+
+        ch = await self.bot.getch_channel(self.bot.config.get("appeals_channel_id"))
+        now_dt = datetime.now()
+
+        emb = Embed(title="Ban Appeal", color=self.bot.colors["light_orange"], timestamp=now_dt)
         emb.add_field(name="User Info", value=f"User: {inter.user}\nID: {inter.user.id}", inline=False)
         emb.add_field(name="Ban Appeal", value=f"```\n{self.appeal.value.strip()}\n```", inline=False)
 
@@ -133,9 +160,9 @@ class BanAppealModal(ui.Modal):
         await appeal_message.add_reaction("🟢")
         await appeal_message.add_reaction("🟡")
         await appeal_message.add_reaction("🔴")
-        await appeal_message.create_thread(name=f"{now.strftime('%m/%d/%Y')} - {inter.user.name}")
+        await appeal_message.create_thread(name=f"{now_dt.strftime('%m/%d/%Y')} - {inter.user.name}")
 
-        await self.bot.db.appeal.reset_appeal_state(inter.user.id, now.timestamp(), appeal_message.id)
+        await self.bot.db.appeal.reset_appeal_state(inter.user.id, now, appeal_message.id)
 
         self.bot.loop.call_later(
             REVIEW_DELAY_SECONDS,
@@ -153,39 +180,15 @@ class BanAppealView(ui.View):
 
     @ui.button(label="Appeal Ban", style=ButtonStyle.blurple, custom_id="appeal")
     async def callback(self, button: ui.Button, inter: Interaction):
-        main_guild = self.bot.guild
+        # Send the modal immediately to avoid Discord timeout
         try:
-            await main_guild.fetch_member(inter.user.id)
-            return await inter.send("You are not banned from the main server.", ephemeral=True)
-        except errors.NotFound:
-            pass
-
-        now = time.time()
-        last_appeal_time, decision = await self.bot.db.appeal.get_last_appeal(inter.user.id)
-
-        # Check for pending appeal
-        pending_entry = await self.bot.db.appeal.get_pending_decision(inter.user.id)
-        if pending_entry:
-            channel = await self.bot.getch_channel(self.bot.config.get("appeals_channel_id"))
+            await inter.response.send_modal(BanAppealModal(self.bot))
+        except nextcord.HTTPException as e:
+            print(f"[Appeal Button Error] Failed to send modal: {e}")
             try:
-                await channel.fetch_message(pending_entry["message_id"])
-                return await inter.send("Your last appeal is still being considered.", ephemeral=True)
-            except errors.NotFound:
-                await self.bot.db.appeal.clear_last_appeal(inter.user.id)
-
-        if last_appeal_time and decision is False:
-            time_since_last = now - last_appeal_time
-            if time_since_last < REAPPEAL_DELAY_SECONDS:
-                seconds_left = int(REAPPEAL_DELAY_SECONDS - time_since_last)
-                days, seconds = divmod(seconds_left, 86400)
-                hours, seconds = divmod(seconds, 3600)
-                minutes, seconds = divmod(seconds, 60)
-                return await inter.send(
-                    f"Your appeal was reviewed and denied. You may appeal again after {days} day(s), {hours} hour(s), {minutes} minute(s), {seconds} second(s).",
-                    ephemeral=True
-                )
-
-        await inter.response.send_modal(BanAppealModal(self.bot))
+                await inter.send("Something went wrong. Please try again.", ephemeral=True)
+            except:
+                pass
 
 
 class BanAppeal(commands.Cog):
