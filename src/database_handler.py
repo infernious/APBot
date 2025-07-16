@@ -107,8 +107,14 @@ class BaseDatabase(metaclass=SingletonMeta):
     async def get_user_infractions(self, user_id: int) -> list:
         user_config = await self.read_user_config(user_id)
         infractions = user_config.get("infractions", [])
-        return [Infraction(**infraction) for infraction in infractions]
 
+        cleaned_infractions = []
+        for inf in infractions:
+            if "type" in inf:
+                inf["actiontype"] = inf.pop("type")  # Rename the key
+            cleaned_infractions.append(Infraction(**inf))
+
+        return cleaned_infractions
 
     async def read_bot_config(self, name: str):
         return await self.bot_config.find_one({"name": name})
