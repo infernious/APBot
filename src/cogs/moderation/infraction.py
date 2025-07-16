@@ -10,13 +10,21 @@ class Infraction(commands.Cog):
     def __init__(self, bot: APBot) -> None:
         self.bot = bot
 
+    def has_mod_role(self, member: Member) -> bool:
+        allowed_roles = {"Trial Chat Moderator", "Chat Moderator", "Admin"}
+        return any(role.name in allowed_roles for role in member.roles)
+
     @slash_command(
         name="warnings",
         description="Show infraction history of a member.",
         default_member_permissions=Permissions(moderate_members=True)
     )
     async def warnings(self, inter: Interaction, member: Member):
-        await inter.response.defer(with_message=False)  # No "Bot is thinking..." message
+        if not self.has_mod_role(inter.user):
+            await inter.response.send_message("You do not have permission to use this command.", ephemeral=True)
+            return
+
+        await inter.response.defer(with_message=False)
 
         infractions = await self.bot.db.base_db.get_user_infractions(member.id)
         inf_points = await self.bot.db.base_db.add_inf_points(member.id, 0)
@@ -25,7 +33,6 @@ class Infraction(commands.Cog):
             await inter.followup.send(f"{member.mention} has no infractions.")
             return
 
-        # Send fetching message and keep reference to reply later
         fetching_msg = await inter.channel.send(f"Fetching {member.mention}'s warnings...")
 
         color_map = {
@@ -49,7 +56,6 @@ class Infraction(commands.Cog):
             mod_tag = f"{mod.global_name}#{mod.discriminator}" if hasattr(mod, "global_name") else f"{mod.name}#{mod.discriminator}"
             mod_line = f"{mod.mention if mod else f'<@{inf.moderator}>'} ({mod_tag})"
 
-            # Parse timestamp
             time = inf.actiontime
             if isinstance(time, str):
                 try:
@@ -63,7 +69,6 @@ class Infraction(commands.Cog):
                 else f"{time.month}/{time.day}/{time.year} {time.strftime('%I:%M %p').lstrip('0')}"
             )
 
-            # Handle duration safely
             duration_line = ""
             if inf.duration:
                 try:
@@ -90,17 +95,16 @@ class Infraction(commands.Cog):
             f"Complete, all infractions shown! {member.mention} has `{inf_points}` infraction point(s)."
         )
 
-
-
     @slash_command(
         name="editip",
         description="Edit a member's infraction points.",
         default_member_permissions=Permissions(moderate_members=True)
     )
     async def editip(self, interaction: Interaction, member: Member, change: int):
-        """
-        Edit a member's infraction points.
-        """
+        if not self.has_mod_role(interaction.user):
+            await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+            return
+
         new_inf_points = await self.bot.db.base_db.add_inf_points(member.id, change)
 
         await interaction.response.send_message(
@@ -110,7 +114,6 @@ class Infraction(commands.Cog):
         if new_inf_points < 30:
             return
 
-        # Notify ban review channel
         ch: Optional[TextChannel] = await self.bot.getch_channel(self.bot.config.get("ban_review_channel-id"))
         if ch:
             await ch.send(
@@ -122,7 +125,6 @@ class Infraction(commands.Cog):
                 )
             )
 
-        # Also ping Chat Moderator in #important-updates
         updates_channel = nextcord.utils.get(interaction.guild.text_channels, name="important-updates")
         if updates_channel:
             mod_role = nextcord.utils.get(interaction.guild.roles, name="Chat Moderator")
@@ -159,9 +161,10 @@ class Infraction(commands.Cog):
 
     @slash_command(name="userip", description="View a member's infraction points.", default_member_permissions=Permissions(moderate_members=True))
     async def userip(self, interaction: Interaction, member: Member):
-        """
-        Displays current infraction points of a user.
-        """
+        if not self.has_mod_role(interaction.user):
+            await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+            return
+
         inf_points = await self.bot.db.base_db.add_inf_points(member.id, 0)
 
         if inf_points == 0:
