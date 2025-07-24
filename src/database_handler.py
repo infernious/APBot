@@ -403,7 +403,10 @@ class AppealDatabase(BaseDatabase):
 
     async def get_last_appeal(self, user_id: int):
         ban_appeal = await self.read_appeal(user_id)
-        return (ban_appeal["submission_time"], ban_appeal["decision"])
+        return (
+            ban_appeal.get("submission_time"),
+            ban_appeal.get("decision")
+        )
 
     async def get_pending_decision(self, user_id: int):
         doc = await self.ban_appeals.find_one({"user_id": user_id, "decision": None})
