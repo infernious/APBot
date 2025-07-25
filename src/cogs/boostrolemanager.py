@@ -1,5 +1,6 @@
-import discord
-from discord.ext import commands
+import nextcord
+from nextcord.ext import commands
+from nextcord import Forbidden, HTTPException
 
 class BoostTracker(commands.Cog):
     def __init__(self, bot):
@@ -19,10 +20,15 @@ class BoostTracker(commands.Cog):
             "nitro-f"
         ]
 
-        for role_name in roles_to_remove:
-            role = discord.utils.get(after.guild.roles, name=role_name)
-            if role not in after.roles: continue
-            await after.remove_roles(role)
+        try:
+            for role_name in roles_to_remove:
+                role = nextcord.utils.get(after.guild.roles, name=role_name)
+                if role not in after.roles: continue
+                await after.remove_roles(role)
+        except Forbidden as e:
+            print(f'Insufficient permissions: {e}')
+        except HTTPException as e:
+            print(f'HTTP request failed: {e}')
 
-async def setup(bot):
-    await bot.add_cog(BoostTracker(bot), guilds=[discord.Object(id=bot.guild_id)])
+def setup(bot):
+    bot.add_cog(BoostTracker(bot))
