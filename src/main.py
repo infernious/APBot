@@ -46,6 +46,7 @@ cogs: List[str] = [
    # "cogs.threads",
      "cogs.rolereact",
      "cogs.logs",
+     "cogs.boostrolemanager",
     
 ]
 
