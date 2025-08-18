@@ -14,3 +14,4 @@ class Infraction:
     duration: Optional[timedelta]
     attachment_url: Optional[str]
     update: List[dict] = field(default_factory=list)
+    date: Optional[datetime] = None
