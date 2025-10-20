@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 class Infraction:
     actiontype: str
     reason: str
-    moderator: Member
+    moderator: Union[int, Member]
     actiontime: datetime
     duration: Optional[timedelta]
     attachment_url: Optional[str]
