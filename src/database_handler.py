@@ -30,7 +30,7 @@ class SingletonMeta(type):
 class BaseDatabase(metaclass=SingletonMeta):
     def __init__(self, conf=None):
         self.bot_user_id: int
-        self.database = database_client["ap-students"]
+        self.database = database_client["ap-test"]
         self.user_config = self.database["user_config"]
         self.bot_config = self.database["bot_config"]
         self.ban_appeals = self.database["ban_appeals"]
@@ -108,13 +108,20 @@ class BaseDatabase(metaclass=SingletonMeta):
         user_config = await self.read_user_config(user_id)
         infractions = user_config.get("infractions", [])
 
+        allowed_keys = {
+            "actiontype", "reason", "moderator", "actiontime", "duration", "attachment_url", "update"
+        }
+
         cleaned_infractions = []
         for inf in infractions:
             if "type" in inf:
-                inf["actiontype"] = inf.pop("type")  # Rename the key
-            cleaned_infractions.append(Infraction(**inf))
+                inf["actiontype"] = inf.pop("type")
+
+            cleaned = {k: v for k, v in inf.items() if k in allowed_keys}
+            cleaned_infractions.append(Infraction(**cleaned))
 
         return cleaned_infractions
+
 
     async def read_bot_config(self, name: str):
         return await self.bot_config.find_one({"name": name})
@@ -403,7 +410,11 @@ class AppealDatabase(BaseDatabase):
 
     async def get_last_appeal(self, user_id: int):
         ban_appeal = await self.read_appeal(user_id)
-        return (ban_appeal["submission_time"], ban_appeal["decision"])
+        return (
+            ban_appeal.get("submission_time"),
+            ban_appeal.get("decision")
+        )
+
 
     async def get_pending_decision(self, user_id: int):
         doc = await self.ban_appeals.find_one({"user_id": user_id, "decision": None})

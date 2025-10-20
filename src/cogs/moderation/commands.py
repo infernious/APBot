@@ -103,12 +103,14 @@ class ModerationCommands(commands.Cog):
             "kick": ("Kick", self.bot.colors.get("dark_orange")),
             "ban": ("Ban", self.bot.colors.get("red")),
             "force-ban": ("Force-Ban", self.bot.colors.get("red")),
-            "unban": ("unban", self.bot.colors.get("green")),
+            "unban": ("Unban", self.bot.colors.get("green")),
         }
 
-        infraction_name, color = infraction_details.get(infraction.actiontype, ("Infraction", nextcord.Color.default()))
+        infraction_name, color = infraction_details.get(
+            infraction.actiontype, ("Infraction", nextcord.Color.default())
+        )
 
-        # Base embed (for both user and logs)
+        # Base embed for both user and logs
         base_embed = Embed(
             title=f"Infraction: {infraction_name}",
             description=f"**Reason:**\n{infraction.reason}",
@@ -124,44 +126,24 @@ class ModerationCommands(commands.Cog):
                 inline=False,
             )
 
-            if infraction.actiontype == "mute":
-                # Determine infraction points based on duration
-                if infraction.duration < 6 * 3600:
-                    change = 5
-                elif infraction.duration < 12 * 3600:
-                    change = 10
-                elif infraction.duration < 24 * 3600:
-                    change = 15
-                elif infraction.duration >= 24 * 3600:
-                    change = 20
-                else:
-                    change = 0
-
-                inf_points = await self.bot.db.base_db.add_inf_points(member.id, change)
-                if inf_points is not None:
-                    base_embed.add_field(
-                        name="**Infraction Points:**",
-                        value=f"`{inf_points}` (+{change})",
-                        inline=False
-                    )
-
-                else:
-                    base_embed.add_field(
-                        name="**Infraction Points:**",
-                        value="Failed to update infraction points in the database.",
-                        inline=False
-                    )
-
         if infraction.attachment_url:
             base_embed.set_image(url=infraction.attachment_url)
 
-        base_embed.set_author(name=member.display_name, icon_url=member.display_avatar.url)
+        # Use display_name if Member, username if User
+        try:
+            name = member.display_name
+            avatar = member.display_avatar.url
+        except AttributeError:
+            name = member.name
+            avatar = member.display_avatar.url if hasattr(member, "display_avatar") else None
 
-        # Make a separate copy for user and logs
+        base_embed.set_author(name=name, icon_url=avatar)
+
+        # Copy for user and logs
         user_embed = base_embed.copy()
         log_embed = base_embed.copy()
 
-        # Only user gets appeal info
+        # Appeal info for bans
         if infraction.actiontype in {"ban", "force-ban"}:
             user_embed.add_field(
                 name="Appeal",
@@ -169,15 +151,16 @@ class ModerationCommands(commands.Cog):
                 inline=False
             )
 
-        # Try to DM the user
+        # Try DM
+        dm_success = True
         try:
             await member.send(embed=user_embed)
         except Forbidden:
-            user_embed.set_footer(text=f"User ID: {member.id} | Could not DM.")
+            dm_success = False
+            user_embed.set_footer(text=f"User ID: {getattr(member, 'id', 'unknown')} | Could not DM.")
 
-        # Send log embed to logs channel
-        logs_channel_name = "logs"
-        logs_channel = nextcord.utils.get(interaction.guild.text_channels, name=logs_channel_name)
+        # Logs channel
+        logs_channel = nextcord.utils.get(interaction.guild.text_channels, name="logs")
         if logs_channel:
             log_embed.add_field(
                 name="Responsible Moderator:",
@@ -186,15 +169,21 @@ class ModerationCommands(commands.Cog):
             )
             log_embed.add_field(
                 name="User ID:",
-                value=f"<@{member.id}> (`{member.id}`)",  # This will ping the user and show their ID in code format
+                value=f"<@{getattr(member, 'id', 'unknown')}> (`{getattr(member, 'id', 'unknown')}`)",
                 inline=False,
+            )
+            log_embed.add_field(
+                name="DM Status:",
+                value="✅ DM sent" if dm_success else "❌ Could not DM",
+                inline=False
             )
             try:
                 await logs_channel.send(embed=log_embed)
             except Forbidden:
                 print("Failed to send to logs channel.")
         else:
-            print(f"Logs channel '{logs_channel_name}' not found.")
+            print(f"Logs channel 'logs' not found.")
+
 
 
 
@@ -223,7 +212,7 @@ class ModerationCommands(commands.Cog):
         await inter.response.send_message(embed=warn_embed)
 
         # Send the infraction response to the logs channel
-        await self.infraction_response( member=member, infraction=warning)
+        await self.infraction_response(inter, member=member, infraction=warning)
 
 
     @slash_command(
@@ -235,8 +224,15 @@ class ModerationCommands(commands.Cog):
         self,
         interaction: Interaction,
         member: Member,
-        reason: str,
-        duration: str = SlashOption(name="duration", description="Mute duration. Format: 5h9m2s", required=True),
+        duration: str = SlashOption(
+            name="duration",
+            description="Mute duration. Format: 5h9m2s",
+            required=True
+        ),
+        reason: str = SlashOption(
+            description="Reason for the mute",
+            required=True
+        ),
         attachment: Attachment = None,
     ):
         duration_seconds: int = convert_time(duration)
@@ -317,8 +313,15 @@ class ModerationCommands(commands.Cog):
         self,
         interaction: Interaction,
         member: Member,
-        reason: str,
-        duration: str = SlashOption(name="duration", description="Mute duration. Format: 5h9m2s", required=True),
+        duration: str = SlashOption(
+            name="duration",
+            description="Mute duration. Format: 5h9m2s",
+            required=True
+        ),
+        reason: str = SlashOption(
+            description="Reason for the mute",
+            required=True
+        ),
     ):
         duration_seconds: int = convert_time(duration)
         time_until = timedelta(seconds=duration_seconds)
@@ -408,10 +411,11 @@ class ModerationCommands(commands.Cog):
         reason: str,
         attachment: Attachment = None,
     ):
-        await interaction.response.defer(ephemeral=True)
-        await member.kick(reason=reason)
+        # Make command visible to everyone (or at least the moderator)
+        await interaction.response.defer(ephemeral=False)
 
-        kick = Infraction(
+        # Create infraction object
+        kick_inf = Infraction(
             actiontype="kick",
             reason=reason,
             moderator=interaction.user,
@@ -419,13 +423,57 @@ class ModerationCommands(commands.Cog):
             attachment_url=attachment.proxy_url if attachment else None
         )
 
-        await self.infraction_response(
-           interaction, member=member, infraction=kick
-        )
+        # Try DM first
+        try:
+            dm_embed = Embed(
+                title="You have been kicked!",
+                description=f"**Reason:**\n{reason}",
+                color=self.bot.colors.get("dark_orange", nextcord.Color.orange()),
+                timestamp=kick_inf.actiontime
+            )
+            if attachment:
+                dm_embed.set_image(url=attachment.proxy_url)
+            await member.send(embed=dm_embed)
+        except Forbidden:
+            pass
 
-        await interaction.followup.send(
-            f"`{member.display_name} successfully kicked.`", ephemeral=True
+        # Kick the user
+        try:
+            await member.kick(reason=reason)
+        except Forbidden:
+            return await interaction.followup.send("❌ I do not have permission to kick this user.", ephemeral=True)
+        except nextcord.HTTPException:
+            return await interaction.followup.send("❌ Failed to kick user.", ephemeral=True)
+
+        # Log embed (same style as ban)
+        kick_embed = Embed(
+            title="Member Kicked!",
+            description=f"{member.mention} has been kicked.\n\n**Reason:**\n{reason}",
+            color=self.bot.colors.get("dark_orange", nextcord.Color.orange()),
+            timestamp=kick_inf.actiontime
         )
+        if attachment:
+            kick_embed.set_image(url=attachment.proxy_url)
+        kick_embed.set_footer(text=f"Kicked by {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
+
+        # Send public confirmation to the mod/server
+        await interaction.followup.send(embed=kick_embed)
+
+        # Send log to logs channel
+        logs_channel = nextcord.utils.get(interaction.guild.text_channels, name="logs")
+        if logs_channel:
+            log_embed = Embed(
+                title="Kick Logged",
+                description=f"User: {member.mention} (`{member.id}`)\nModerator: {interaction.user.mention}",
+                color=self.bot.colors.get("dark_orange", nextcord.Color.orange()),
+                timestamp=kick_inf.actiontime
+            )
+            log_embed.add_field(name="Reason", value=reason, inline=False)
+            log_embed.add_field(name="DM Status", value=dm_status, inline=False)
+            if attachment:
+                log_embed.set_image(url=attachment.proxy_url)
+            await logs_channel.send(embed=log_embed)
+
 
     @slash_command(
         name="ban",
@@ -441,8 +489,6 @@ class ModerationCommands(commands.Cog):
     ):
         await interaction.response.defer(ephemeral=False)
 
-        await member.ban(reason=reason)
-
         ban = Infraction(
             actiontype="ban",
             reason=reason,
@@ -451,7 +497,11 @@ class ModerationCommands(commands.Cog):
             attachment_url=attachment.proxy_url if attachment else None
         )
 
+        # ✅ DM the user and log BEFORE banning (so the DM goes through)
         await self.infraction_response(interaction, member=member, infraction=ban)
+
+        # 🚫 Then actually ban them
+        await member.ban(reason=reason)
 
         ban_embed = Embed(
             title="Member Banned!",
@@ -465,6 +515,7 @@ class ModerationCommands(commands.Cog):
 
         ban_embed.set_footer(text=f"Banned by {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
         await interaction.followup.send(embed=ban_embed)
+
 
 
     @slash_command(
@@ -481,10 +532,7 @@ class ModerationCommands(commands.Cog):
     ):
         await interaction.response.defer(ephemeral=False)
 
-        # Ban using guild method to support users not in server
-        await interaction.guild.ban(user=user, reason=reason, delete_message_seconds=604800)
-
-        forceban = Infraction(
+        forceban_inf = Infraction(
             actiontype="force-ban",
             reason=reason,
             moderator=interaction.user,
@@ -492,20 +540,29 @@ class ModerationCommands(commands.Cog):
             attachment_url=attachment.proxy_url if attachment else None
         )
 
-        await self.infraction_response(interaction, member=user, infraction=forceban)
+        # ✅ DM first
+        await self.infraction_response(interaction, member=user, infraction=forceban_inf)
+
+        # 🚫 Ban user by ID (works even if they left)
+        try:
+            await interaction.guild.ban(user=user, reason=reason, delete_message_seconds=604800)
+        except Forbidden:
+            return await interaction.followup.send("❌ I don't have permission to ban this user.", ephemeral=True)
+        except nextcord.HTTPException:
+            return await interaction.followup.send("❌ Failed to ban user.", ephemeral=True)
 
         embed = Embed(
             title="Member Force-Banned!",
             description=f"{user.mention} has been force-banned.\n\n**Reason:**\n{reason}",
             color=self.bot.colors.get("red", Color.red()),
-            timestamp=forceban.actiontime
+            timestamp=forceban_inf.actiontime
         )
-
         if attachment:
             embed.set_image(url=attachment.proxy_url)
-
         embed.set_footer(text=f"Force-banned by {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
-        await interaction.followup.send(embed=embed) 
+        await interaction.followup.send(embed=embed)
+
+    
 
 
 
@@ -517,49 +574,37 @@ class ModerationCommands(commands.Cog):
     async def unban(
         self,
         interaction: Interaction,
-        user: Union[Member, nextcord.User],
+        user: nextcord.User,  # Use User only, since Member won't exist
         reason: str = SlashOption(description="Reason for unban", required=True)
     ):
         await interaction.response.defer(ephemeral=False)
 
-        # Attempt to unban the user
-        try:
-            await interaction.guild.unban(user, reason=reason)
-        except nextcord.NotFound:
-            await interaction.followup.send(
-                f"❌ User `{user}` is not banned or the ID is incorrect.",
-                ephemeral=True
-            )
-            return
-        except nextcord.Forbidden:
-            await interaction.followup.send(
-                "❌ I do not have permission to unban this user.",
-                ephemeral=True
-            )
-            return
-
-        # Create an Infraction instance for logging
-        unban = Infraction(
-            actiontype="unban",  # Technically it's an "unban", but for consistency in your embed logic
+        # ✅ DM before unban
+        unban_inf = Infraction(
+            actiontype="unban",
             reason=reason,
             moderator=interaction.user,
             actiontime=datetime.now()
         )
+        await self.infraction_response(interaction, member=user, infraction=unban_inf)
 
-        # Send the infraction log to logs channel
-        await self.infraction_response(interaction, member=user, infraction=unban)
+        # Attempt to unban
+        try:
+            await interaction.guild.unban(user, reason=reason)
+        except nextcord.NotFound:
+            return await interaction.followup.send(f"❌ User `{user}` is not banned or ID is incorrect.", ephemeral=True)
+        except Forbidden:
+            return await interaction.followup.send("❌ I do not have permission to unban this user.", ephemeral=True)
 
-        # Prepare confirmation embed
         embed = Embed(
             title="Member Unbanned!",
             description=f"{user.mention} has been unbanned.\n\n**Reason:**\n{reason}",
             color=self.bot.colors.get("green", Color.green()),
             timestamp=datetime.now()
         )
-
         embed.set_footer(text=f"Unbanned by {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
-
         await interaction.followup.send(embed=embed)
+
 
 
 
