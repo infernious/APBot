@@ -469,7 +469,6 @@ class ModerationCommands(commands.Cog):
                 timestamp=kick_inf.actiontime
             )
             log_embed.add_field(name="Reason", value=reason, inline=False)
-            log_embed.add_field(name="DM Status", value=dm_status, inline=False)
             if attachment:
                 log_embed.set_image(url=attachment.proxy_url)
             await logs_channel.send(embed=log_embed)
