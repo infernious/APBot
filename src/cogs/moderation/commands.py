@@ -469,7 +469,6 @@ class ModerationCommands(commands.Cog):
                 timestamp=kick_inf.actiontime
             )
             log_embed.add_field(name="Reason", value=reason, inline=False)
-            log_embed.add_field(name="DM Status", value=dm_status, inline=False)
             if attachment:
                 log_embed.set_image(url=attachment.proxy_url)
             await logs_channel.send(embed=log_embed)
@@ -489,16 +488,16 @@ class ModerationCommands(commands.Cog):
     ):
         await interaction.response.defer(ephemeral=False)
 
-        ban = Infraction(
+        ban_inf = Infraction(
             actiontype="ban",
             reason=reason,
             moderator=interaction.user,
             actiontime=datetime.now(),
             attachment_url=attachment.proxy_url if attachment else None
         )
-
+        await self.bot.db.base_db.add_infraction(member.id, ban_inf)
         # ✅ DM the user and log BEFORE banning (so the DM goes through)
-        await self.infraction_response(interaction, member=member, infraction=ban)
+        await self.infraction_response(interaction, member=member, infraction=ban_inf)
 
         # 🚫 Then actually ban them
         await member.ban(reason=reason)
@@ -507,7 +506,7 @@ class ModerationCommands(commands.Cog):
             title="Member Banned!",
             description=f"{member.mention} has been banned.\n\n**Reason:**\n{reason}",
             color=self.bot.colors.get("red", Color.red()),
-            timestamp=ban.actiontime
+            timestamp=ban_inf.actiontime
         )
 
         if attachment:
@@ -530,6 +529,7 @@ class ModerationCommands(commands.Cog):
         reason: str,
         attachment: Attachment = None,
     ):
+        await self.bot.db.base_db.add_infraction(user.id, forceban_inf)
         await interaction.response.defer(ephemeral=False)
 
         forceban_inf = Infraction(

@@ -114,13 +114,31 @@ class BaseDatabase(metaclass=SingletonMeta):
 
         cleaned_infractions = []
         for inf in infractions:
+            # backward compatibility
             if "type" in inf:
                 inf["actiontype"] = inf.pop("type")
 
             cleaned = {k: v for k, v in inf.items() if k in allowed_keys}
+
+            # 🧩 Fill defaults for missing fields
+            cleaned.setdefault("reason", "No reason provided")
+            cleaned.setdefault("actiontime", datetime.utcnow().isoformat())
+            cleaned.setdefault("duration", None)
+            cleaned.setdefault("attachment_url", None)
+            cleaned.setdefault("update", [])
+            cleaned.setdefault("moderator", 0)
+
+            # Convert ISO strings safely to datetime objects
+            try:
+                if isinstance(cleaned["actiontime"], str):
+                    cleaned["actiontime"] = datetime.fromisoformat(cleaned["actiontime"])
+            except Exception:
+                cleaned["actiontime"] = datetime.utcnow()
+
             cleaned_infractions.append(Infraction(**cleaned))
 
         return cleaned_infractions
+
 
 
     async def read_bot_config(self, name: str):

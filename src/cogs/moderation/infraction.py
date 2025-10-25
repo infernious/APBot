@@ -25,7 +25,6 @@ class Infraction(commands.Cog):
             return
 
         await inter.response.defer(with_message=False)
-
         infractions = await self.bot.db.base_db.get_user_infractions(member.id)
         inf_points = await self.bot.db.base_db.add_inf_points(member.id, 0)
 
