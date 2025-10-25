@@ -188,6 +188,9 @@ class Modmail(commands.Cog):
                         # ✅ Always attempt to correct the thread name
                         if thread.name != expected_name:
                             try:
+                                if thread.archived:
+                                    await thread.edit(archived=False)
+                                    await asyncio.sleep(1) 
                                 await thread.edit(name=expected_name)
                             except Exception as e:
                                 print(f"Could not rename thread: {e}")
