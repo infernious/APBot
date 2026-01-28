@@ -30,7 +30,7 @@ class SingletonMeta(type):
 class BaseDatabase(metaclass=SingletonMeta):
     def __init__(self, conf=None):
         self.bot_user_id: int
-        self.database = database_client["ap-test"]
+        self.database = database_client["ap-students"]
         self.user_config = self.database["user_config"]
         self.bot_config = self.database["bot_config"]
         self.ban_appeals = self.database["ban_appeals"]
