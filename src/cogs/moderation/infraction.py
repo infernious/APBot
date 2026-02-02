@@ -1,10 +1,21 @@
 import nextcord
+import re
 from nextcord import slash_command, Permissions, Interaction, User, Embed, Member, TextChannel, Object, Color
 from nextcord.ext import commands
 from typing import Optional
 from bot_base import APBot
 from datetime import datetime, timedelta
 
+def to_snowflake(value):
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        m = re.search(r"\d{17,20}", value)
+        if m:
+            return int(m.group(0))
+    return None
 
 class Infraction(commands.Cog):
     def __init__(self, bot: APBot) -> None:
@@ -14,87 +25,126 @@ class Infraction(commands.Cog):
         allowed_roles = {"Trial Chat Moderator", "Chat Moderator", "Admin"}
         return any(role.name in allowed_roles for role in member.roles)
 
-    @slash_command(
-        name="warnings",
-        description="Show infraction history of a member.",
-        default_member_permissions=Permissions(moderate_members=True)
-    )
-    async def warnings(self, inter: Interaction, member: Member):
-        if not self.has_mod_role(inter.user):
-            await inter.response.send_message("You do not have permission to use this command.", ephemeral=True)
-            return
+@slash_command(
+    name="warnings",
+    description="Show infraction history of a member.",
+    default_member_permissions=Permissions(moderate_members=True),
+)
+async def warnings(self, inter: Interaction, member: Member):
+    if not self.has_mod_role(inter.user):
+        await inter.response.send_message(
+            "You do not have permission to use this command.", ephemeral=True
+        )
+        return
 
-        await inter.response.defer(with_message=False)
+    await inter.response.defer(with_message=False)
 
-        infractions = await self.bot.db.base_db.get_user_infractions(member.id)
-        inf_points = await self.bot.db.base_db.add_inf_points(member.id, 0)
+    infractions = await self.bot.db.base_db.get_user_infractions(member.id)
+    inf_points = await self.bot.db.base_db.add_inf_points(member.id, 0)
 
-        if not infractions:
-            await inter.followup.send(f"{member.mention} has no infractions.")
-            return
+    if not infractions:
+        await inter.followup.send(f"{member.mention} has no infractions.")
+        return
 
-        fetching_msg = await inter.channel.send(f"Fetching {member.mention}'s warnings...")
+    fetching_msg = await inter.channel.send(f"Fetching {member.mention}'s warnings...")
 
-        color_map = {
-            "warn": self.bot.colors.get("yellow", Color.yellow()),
-            "mute": self.bot.colors.get("orange", Color.orange()),
-            "pseudo-mute": self.bot.colors.get("light_orange", Color.orange()),
-            "kick": self.bot.colors.get("dark_orange", Color.orange()),
-            "ban": self.bot.colors.get("red", Color.red()),
-            "force-ban": self.bot.colors.get("red", Color.red()),
-            "unmute": self.bot.colors.get("green", Color.green()),
-            "unban": self.bot.colors.get("green", Color.green()),
-        }
+    color_map = {
+        "warn": self.bot.colors.get("yellow", Color.yellow()),
+        "mute": self.bot.colors.get("orange", Color.orange()),
+        "pseudo-mute": self.bot.colors.get("light_orange", Color.orange()),
+        "kick": self.bot.colors.get("dark_orange", Color.orange()),
+        "ban": self.bot.colors.get("red", Color.red()),
+        "force-ban": self.bot.colors.get("red", Color.red()),
+        "unmute": self.bot.colors.get("green", Color.green()),
+        "unban": self.bot.colors.get("green", Color.green()),
+    }
 
-        total = len(infractions)
+    total = len(infractions)
 
-        for index, inf in enumerate(infractions, start=1):
-            action = inf.actiontype.capitalize().replace("-", " ")
-            reason = inf.reason or "No reason provided"
+    for index, inf in enumerate(infractions, start=1):
+        action = (inf.actiontype or "unknown").capitalize().replace("-", " ")
+        reason = inf.reason or "No reason provided"
 
-            mod = inter.guild.get_member(inf.moderator) or await self.bot.fetch_user(inf.moderator)
-            mod_tag = f"{mod.global_name}#{mod.discriminator}" if hasattr(mod, "global_name") else f"{mod.name}#{mod.discriminator}"
-            mod_line = f"{mod.mention if mod else f'<@{inf.moderator}>'} ({mod_tag})"
+        # ---- Moderator lookup (fixed) ----
+        raw_mod = getattr(inf, "moderator", None)
+        moderator_id = to_snowflake(raw_mod)
 
-            time = inf.actiontime
-            if isinstance(time, str):
+        mod = None
+        if moderator_id:
+            # Try guild cache first (only if in a guild)
+            if inter.guild is not None:
+                mod = inter.guild.get_member(moderator_id)
+
+            # Fallback to API fetch
+            if mod is None:
                 try:
-                    time = datetime.fromisoformat(time)
-                except ValueError:
-                    time = datetime.utcfromtimestamp(float(time))
+                    mod = await self.bot.fetch_user(moderator_id)
+                except nextcord.HTTPException:
+                    mod = None
 
-            timestamp = (
-                f"Yesterday at {time.strftime('%I:%M %p').lstrip('0')}"
-                if (datetime.now() - time).days < 1
-                else f"{time.month}/{time.day}/{time.year} {time.strftime('%I:%M %p').lstrip('0')}"
-            )
+        # Build moderator display:
+        # - If we found the user => mention + display name
+        # - If not => still mention the ID if we have one, else show whatever was stored
+        if mod:
+            display = getattr(mod, "global_name", None) or mod.name
+            mod_line = f"{mod.mention} ({display})"
+        else:
+            if moderator_id:
+                mod_line = f"<@{moderator_id}> (unknown)"
+            else:
+                mod_line = f"{raw_mod} (unknown)" if raw_mod else "Unknown moderator"
+        # -------------------------------
 
-            duration_line = ""
-            if inf.duration:
+        # ---- Time parsing ----
+        time_val = getattr(inf, "actiontime", None)
+        if isinstance(time_val, str):
+            try:
+                time_val = datetime.fromisoformat(time_val)
+            except ValueError:
                 try:
-                    duration_seconds = int(inf.duration.total_seconds()) if isinstance(inf.duration, timedelta) else int(inf.duration)
-                    hours = duration_seconds // 3600
-                    duration_line = f"Duration: {hours}h\n"
-                except (ValueError, TypeError, AttributeError):
-                    pass
+                    time_val = datetime.utcfromtimestamp(float(time_val))
+                except Exception:
+                    time_val = datetime.utcnow()
+        elif not isinstance(time_val, datetime):
+            time_val = datetime.utcnow()
 
-            embed = Embed(
-                title=action,
-                description=(
-                    f"Reason: {reason}\n"
-                    f"{duration_line}"
-                    f"Responsible Mod: {mod_line}\n"
-                    f"{index}/{total} infractions • {timestamp}"
-                ),
-                color=color_map.get(inf.actiontype, Color.gold())
-            )
-
-            await inter.channel.send(embed=embed)
-
-        await fetching_msg.reply(
-            f"Complete, all infractions shown! {member.mention} has `{inf_points}` infraction point(s)."
+        now = datetime.now(time_val.tzinfo) if time_val.tzinfo else datetime.now()
+        timestamp = (
+            f"Yesterday at {time_val.strftime('%I:%M %p').lstrip('0')}"
+            if (now - time_val).days < 1
+            else f"{time_val.month}/{time_val.day}/{time_val.year} {time_val.strftime('%I:%M %p').lstrip('0')}"
         )
 
+        # ---- Duration ----
+        duration_line = ""
+        if getattr(inf, "duration", None):
+            try:
+                dur = inf.duration
+                duration_seconds = (
+                    int(dur.total_seconds()) if isinstance(dur, timedelta) else int(dur)
+                )
+                hours = duration_seconds // 3600
+                duration_line = f"Duration: {hours}h\n"
+            except (ValueError, TypeError, AttributeError):
+                pass
+
+        embed = Embed(
+            title=action,
+            description=(
+                f"Reason: {reason}\n"
+                f"{duration_line}"
+                f"Responsible Mod: {mod_line}\n"
+                f"{index}/{total} infractions • {timestamp}"
+            ),
+            color=color_map.get(getattr(inf, "actiontype", ""), Color.gold()),
+        )
+
+        await inter.channel.send(embed=embed)
+
+    await fetching_msg.reply(
+        f"Complete, all infractions shown! {member.mention} has `{inf_points}` infraction point(s)."
+    )
+        
     @slash_command(
         name="editip",
         description="Edit a member's infraction points.",
