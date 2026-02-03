@@ -7,6 +7,11 @@ from bot_base import APBot
 import asyncio
 from datetime import datetime, timedelta
 import time
+from config_handler import Config
+config_path = "config.json"
+conf = Config(config_path)
+
+APPEAL_GUILD_ID = int(conf.get("ban_appeal_server"))  
 
 REVIEW_DELAY_SECONDS = 60 * 60 * 24 * 14  # 2 weeks
 REAPPEAL_DELAY_SECONDS = 60 * 60 * 24 * 84  # 12 weeks
@@ -211,23 +216,27 @@ class BanAppeal(commands.Cog):
             else:
                 self.bot.loop.call_later(time_left, asyncio.create_task, generic_decide(self.bot, user_id, message_id))
 
-    @slash_command(name="appealbutton", default_member_permissions=0x8)  # Admin only
+    @slash_command(
+        name="appealbutton",
+        default_member_permissions=0x8,  # admin
+        guild_ids=[APPEAL_GUILD_ID],   # ONLY appeal guild
+    )
     async def send_appeal_button(self, inter: Interaction):
-        if inter.guild.id not in [
-            int(self.bot.config.get("guild_id")),
-            int(self.bot.config.get("ban_appeal_server"))
-        ]:
-            return await inter.send("This command can't be used in this server.", ephemeral=True)
-
         await inter.send(
             embed=Embed(
                 title="Ban Appeal",
-                description="To begin the appeal process, please click on the button below. Your appeal will be decided after 2 weeks of submission. You must wait before sending another appeal if denied.",
+                description=(
+                    "**To begin the appeal process, click the button below.**\n\n"
+                    "Appeals are reviewed **two weeks after submission**. Once submitted, "
+                    "your appeal cannot be edited or withdrawn, so please make sure all "
+                    "required information is included.\n\n"
+                    "**Decisions are automated.** If your appeal is rejected, you will not "
+                    "be able to submit another appeal for **12 weeks**."
+                ),
                 color=self.bot.colors["blue"],
             ),
             view=BanAppealView(self.bot),
         )
-
 
 def setup(bot: APBot) -> None:
     bot.add_cog(BanAppeal(bot))
