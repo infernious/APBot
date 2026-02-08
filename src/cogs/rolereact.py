@@ -3,6 +3,13 @@ from nextcord import slash_command, Interaction
 from nextcord.ext import commands, application_checks
 from bot_base import APBot
 blue = 0x00ffff
+from config_handler import Config
+config_path = "config.json"
+conf = Config(config_path)
+
+ALLOWED_ROLES = ("Admin", "Chat Moderator") 
+
+
 
 class Arts(nextcord.ui.View):
     def __init__(self, bot):
@@ -556,7 +563,7 @@ class PostAP(nextcord.ui.View):
         self.bot = bot
 
     @nextcord.ui.button(label='Post-AP Math', style=nextcord.ButtonStyle.grey, custom_id='Post-AP Math',
-                       emoji='🧮')
+                       emoji='🧮', row = 0)
     async def postapmath(self, button: nextcord.ui.Button, interaction: nextcord.Interaction):
         role = nextcord.utils.get(interaction.guild.roles, name="Post-AP Math")
         member = interaction.guild.get_member(interaction.user.id)
@@ -568,8 +575,22 @@ class PostAP(nextcord.ui.View):
             await member.add_roles(role)
             await interaction.response.send_message(f"`{role.name}` role added!", ephemeral=True)
 
+    @nextcord.ui.button(label='Higher Bio', style=nextcord.ButtonStyle.grey, custom_id='Higher Bio',
+                       emoji='🧬', row = 0)
+    async def higherbio(self, button: nextcord.ui.Button, interaction: nextcord.Interaction):
+        role = nextcord.utils.get(interaction.guild.roles, name="Higher Bio")
+        member = interaction.guild.get_member(interaction.user.id)
+
+        if role in member.roles:
+            await member.remove_roles(role)
+            await interaction.response.send_message(f"`{role.name}` role removed!", ephemeral=True)
+        else:
+            await member.add_roles(role)
+            await interaction.response.send_message(f"`{role.name}` role added!", ephemeral=True)
+
+
     @nextcord.ui.button(label='Higher CS', style=nextcord.ButtonStyle.grey, custom_id='Higher CS',
-                       emoji='💻')
+                       emoji='💻', row = 1)
     async def highercs(self, button: nextcord.ui.Button, interaction: nextcord.Interaction):
         role = nextcord.utils.get(interaction.guild.roles, name="Higher CS")
         member = interaction.guild.get_member(interaction.user.id)
@@ -581,10 +602,24 @@ class PostAP(nextcord.ui.View):
             await member.add_roles(role)
             await interaction.response.send_message(f"`{role.name}` role added!", ephemeral=True)
 
-    @nextcord.ui.button(label='Higher Other', style=nextcord.ButtonStyle.grey, custom_id='Higher Other',
-                       emoji='📚')
-    async def higherother(self, button: nextcord.ui.Button, interaction: nextcord.Interaction):
-        role = nextcord.utils.get(interaction.guild.roles, name="Higher Other")
+    @nextcord.ui.button(label='Higher Physics', style=nextcord.ButtonStyle.grey, custom_id='Higher Physics',
+                       emoji='⚛️', row = 1)
+    async def higherphysics(self, button: nextcord.ui.Button, interaction: nextcord.Interaction):
+        role = nextcord.utils.get(interaction.guild.roles, name="Higher Physics")
+        member = interaction.guild.get_member(interaction.user.id)
+
+        if role in member.roles:
+            await member.remove_roles(role)
+            await interaction.response.send_message(f"`{role.name}` role removed!", ephemeral=True)
+        else:
+            await member.add_roles(role)
+            await interaction.response.send_message(f"`{role.name}` role added!", ephemeral=True)
+
+
+    @nextcord.ui.button(label='Higher Chem', style=nextcord.ButtonStyle.grey, custom_id='Higher Chem',
+                       emoji='⚗️', row = 2)
+    async def higherchem(self, button: nextcord.ui.Button, interaction: nextcord.Interaction):
+        role = nextcord.utils.get(interaction.guild.roles, name="Higher Chem")
         member = interaction.guild.get_member(interaction.user.id)
 
         if role in member.roles:
@@ -975,147 +1010,62 @@ class LoungeThree(nextcord.ui.View):
 
 
 class RoleReact(commands.Cog):
-    """Role React"""
+    """Role React (3 commands only)"""
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-    @slash_command(name="roles_arts", description="Show Arts role buttons")
-    @application_checks.has_role("Admin")
-    async def roles_arts(self, interaction: Interaction):
-        embed = nextcord.Embed(
-            title="Welcome to the server!",
-            description=(
-                "To access subject channels for specific AP classes, click on a button to receive the role.\n"
-                "To remove the role, click on the button again."
-            ),
-            color=nextcord.Color.orange()
+    async def _post_panel(self, interaction: Interaction, title: str, description: str,
+                          color: nextcord.Color, image_url: str, view: nextcord.ui.View):
+        embed = nextcord.Embed(title=title, description=description, color=color)
+        if image_url:
+            embed.set_image(url=image_url)
+        await interaction.followup.send(embed=embed, view=view)
+
+    @slash_command(name="rolesignup", description="Post all AP role signup panels", guild_ids=[conf.get("guild_id")])
+    @application_checks.has_any_role(*ALLOWED_ROLES)
+    async def rolesignup(self, interaction: Interaction):
+        # ✅ no message, just acknowledge silently
+        await interaction.response.defer()
+
+        common_desc = (
+            "To access subject channels for specific AP classes, click on a button to receive the role.\n"
+            "To remove the role, click on the button again."
         )
 
-        embed.set_image(
-            url="https://media.discordapp.net/attachments/787749899160387674/1061800484832301066/arts.png?ex=686bba82&is=686a6902&hm=d7e0efa54909fdb3eed15b0bf0e66fa5cc04df870d899dd1b0e25ca42db7e123&=&width=1242&height=767"
-        )
+        await self._post_panel(interaction, "Welcome to the server!", common_desc, nextcord.Color.orange(),
+            "https://media.discordapp.net/attachments/787749899160387674/1061800484832301066/arts.png?ex=686bba82&is=686a6902&hm=d7e0efa54909fdb3eed15b0bf0e66fa5cc04df870d899dd1b0e25ca42db7e123&=&width=1242&height=767",
+            Arts(self.bot))
 
-        await interaction.send(embed=embed, view=Arts(self.bot))
+        await self._post_panel(interaction, "Welcome to the server!", common_desc, nextcord.Color.from_rgb(100, 149, 237),
+            "https://media.discordapp.net/attachments/787749899160387674/1061800485184602112/English.png?ex=686bba82&is=686a6902&hm=f1c3e0caeb46373881badb476d793197dfedd9c5bf1816ddcda0e70da4828291&=&width=1439&height=890",
+            English(self.bot))
 
+        await self._post_panel(interaction, "Welcome to the server!", common_desc, nextcord.Color.from_rgb(255, 165, 0),
+            "https://media.discordapp.net/attachments/787749899160387674/1061800485515968542/Languages.png?ex=686bba83&is=686a6903&hm=42d835b7d73cc748663490276bde5ce5600397db4245eb78943adb33341ec9e5&=&width=1439&height=890",
+            Languages(self.bot))
 
-    @slash_command(name="roles_english", description="Show English role buttons")
-    @application_checks.has_role("Admin")
-    async def roles_english(self, interaction: Interaction):
-        embed = nextcord.Embed(
-            title="Welcome to the server!",
-            description=(
-                "To access subject channels for specific AP classes, click on a button to receive the role.\n"
-                "To remove the role, click on the button again."
-            ),
-            color=nextcord.Color.from_rgb(100, 149, 237)  # Cornflower blue vibe
-        )
+        await self._post_panel(interaction, "Welcome to the server!", common_desc, nextcord.Color.from_rgb(72, 209, 204),
+            "https://media.discordapp.net/attachments/787749899160387674/1061800485859905636/Math_CS.png?ex=686bba83&is=686a6903&hm=4df997d29b400ba9a1fb3e88968b5ea891b8d8d40467ea4332e49abf2acc18c0&=&width=1439&height=890",
+            MathCS(self.bot))
 
-        embed.set_image(
-            url="https://media.discordapp.net/attachments/787749899160387674/1061800485184602112/English.png?ex=686bba82&is=686a6902&hm=f1c3e0caeb46373881badb476d793197dfedd9c5bf1816ddcda0e70da4828291&=&width=1439&height=890"
-        )
+        await self._post_panel(interaction, "Welcome to the server!", common_desc, nextcord.Color.from_rgb(144, 238, 144),
+            "https://media.discordapp.net/attachments/518668543437570061/599914180828594206/bruh_moment.png?ex=686ba51e&is=686a539e&hm=b1740201dbc2d4a23ded595eb552090b7dcdc6380f6d8d3ee79ea3b6e8f84238&=&width=1439&height=890",
+            Sciences(self.bot))
 
-        await interaction.send(embed=embed, view=English(self.bot))
+        await self._post_panel(interaction, "Welcome to the server!", common_desc, nextcord.Color.from_rgb(255, 215, 0),
+            "https://media.discordapp.net/attachments/787749899160387674/1061800484400267335/Social_Studies.png?ex=686bba82&is=686a6902&hm=124b280d1e05222b600609b1608cbe48d37780897ce2e970d575d789294edd02&=&width=1439&height=890",
+            SocialStudies(self.bot))
 
+        await self._post_panel(interaction, "Welcome to the server!", common_desc, nextcord.Color.from_rgb(186, 85, 211),
+            "https://cdn.discordapp.com/attachments/791130847461507096/1470030943048831168/image.png?ex=6989d080&is=69887f00&hm=4d0d5b3611e24cbc797bc58e591acfc294b26f20ef43244b01857ab7c06fea7f",
+            PostAP(self.bot))
 
-    @slash_command(name="roles_languages", description="Show Languages role buttons")
-    @application_checks.has_role("Admin")
-    async def roles_languages(self, interaction: Interaction):
-        embed = nextcord.Embed(
-            title="Welcome to the server!",
-            description=(
-                "To access subject channels for specific AP classes, click on a button to receive the role.\n"
-                "To remove the role, click on the button again."
-            ),
-            color=nextcord.Color.from_rgb(255, 165, 0)  # Light orange / gold tone
-        )
+    @slash_command(name="nitro-perks", description="Post Nitro Booster perks panel", guild_ids=[conf.get("guild_id")])
+    @application_checks.has_any_role(*ALLOWED_ROLES)
+    async def nitro_perks(self, interaction: Interaction):
+        await interaction.response.defer()
 
-        embed.set_image(
-            url="https://media.discordapp.net/attachments/787749899160387674/1061800485515968542/Languages.png?ex=686bba83&is=686a6903&hm=42d835b7d73cc748663490276bde5ce5600397db4245eb78943adb33341ec9e5&=&width=1439&height=890"
-        )
-
-        await interaction.send(embed=embed, view=Languages(self.bot))
-
-
-    @slash_command(name="roles_mathcs", description="Show Math/CS role buttons")
-    @application_checks.has_role("Admin")
-    async def roles_mathcs(self, interaction: Interaction):
-        embed = nextcord.Embed(
-            title="Welcome to the server!",
-            description=(
-                "To access subject channels for specific AP classes, click on a button to receive the role.\n"
-                "To remove the role, click on the button again."
-            ),
-            color=nextcord.Color.from_rgb(72, 209, 204)  # Medium turquoise vibe
-        )
-
-        embed.set_image(
-            url="https://media.discordapp.net/attachments/787749899160387674/1061800485859905636/Math_CS.png?ex=686bba83&is=686a6903&hm=4df997d29b400ba9a1fb3e88968b5ea891b8d8d40467ea4332e49abf2acc18c0&=&width=1439&height=890"
-        )
-
-        await interaction.send(embed=embed, view=MathCS(self.bot))
-
-
-    @slash_command(name="roles_sciences", description="Show Sciences role buttons")
-    @application_checks.has_role("Admin")
-    async def roles_sciences(self, interaction: Interaction):
-        embed = nextcord.Embed(
-            title="Welcome to the server!",
-            description=(
-                "To access subject channels for specific AP classes, click on a button to receive the role.\n"
-                "To remove the role, click on the button again."
-            ),
-            color=nextcord.Color.from_rgb(144, 238, 144)  # Light green science tone
-        )
-
-        embed.set_image(
-            url="https://media.discordapp.net/attachments/518668543437570061/599914180828594206/bruh_moment.png?ex=686ba51e&is=686a539e&hm=b1740201dbc2d4a23ded595eb552090b7dcdc6380f6d8d3ee79ea3b6e8f84238&=&width=1439&height=890"
-        )
-
-        await interaction.send(embed=embed, view=Sciences(self.bot))
-
-
-    @slash_command(name="roles_socialstudies", description="Show Social Studies role buttons")
-    @application_checks.has_role("Admin")
-    async def roles_socialstudies(self, interaction: Interaction):
-        embed = nextcord.Embed(
-            title="Welcome to the server!",
-            description=(
-                "To access subject channels for specific AP classes, click on a button to receive the role.\n"
-                "To remove the role, click on the button again."
-            ),
-            color=nextcord.Color.from_rgb(255, 215, 0)  # Golden yellow tone
-        )
-
-        embed.set_image(
-            url="https://media.discordapp.net/attachments/787749899160387674/1061800484400267335/Social_Studies.png?ex=686bba82&is=686a6902&hm=124b280d1e05222b600609b1608cbe48d37780897ce2e970d575d789294edd02&=&width=1439&height=890"
-        )
-
-        await interaction.send(embed=embed, view=SocialStudies(self.bot))
-
-
-    @slash_command(name="roles_postap", description="Show Post-AP role buttons")
-    @application_checks.has_role("Admin")
-    async def roles_postap(self, interaction: Interaction):
-        embed = nextcord.Embed(
-            title="Welcome to the server!",
-            description=(
-                "To access subject channels for specific AP classes, click on a button to receive the role.\n"
-                "To remove the role, click on the button again."
-            ),
-            color=nextcord.Color.from_rgb(186, 85, 211)  # Medium orchid tone
-        )
-
-        embed.set_image(
-            url="https://media.discordapp.net/attachments/787749899160387674/1061800486262538361/Post_AP_Classes.png?ex=686bba83&is=686a6903&hm=ec64a1a62b6e8920912d69e916693209f4bee7906fb408f44b4140e791a32e62&=&width=1439&height=890"
-        )
-
-        await interaction.send(embed=embed, view=PostAP(self.bot))
-
-
-    @slash_command(name="roles_booster", description="Show Booster role buttons")
-    @application_checks.has_role("Admin")
-    async def roles_booster(self, interaction: Interaction):
         embed = nextcord.Embed(
             title="Thanks for boosting the server!",
             description=(
@@ -1124,61 +1074,37 @@ class RoleReact(commands.Cog):
             ),
             color=nextcord.Color.teal()
         )
-
         embed.set_image(
             url="https://cdn.discordapp.com/attachments/791130847461507093/1391460319892733962/image.png?ex=686bf9e8&is=686aa868&hm=8a55fcc3b4a5ec4dfef2b46635c760003d7a618070751a943a467a687a1726ac&"
         )
+        await interaction.followup.send(embed=embed, view=Booster(self.bot), ephemeral=False)
 
-        await interaction.send(embed=embed, view=Booster(self.bot))
+    @slash_command(name="lougue-signup", description="Post Lounge role signup panels", guild_ids=[conf.get("guild_id")])
+    @application_checks.has_any_role(*ALLOWED_ROLES)
+    async def lougue_signup(self, interaction: Interaction):
+        await interaction.response.defer()
 
+        desc = "Welcome to Lounge! Sign up for roles to talk about non-academic subjects! Note that the events role will ping you everytime there's an event."
 
+        await self._post_panel(interaction, "Choose Your Lounge One Roles", desc, nextcord.Color.teal(),
+            "https://media.discordapp.net/attachments/787749899160387674/1066274148067840140/Lounge_1.png?ex=686b862f&is=686a34af&hm=725d4acc9e5d574735c268e1708a539f4de09f2d7f5f8e6dcd0f933610679629&=&width=1439&height=890",
+            LoungeOne(self.bot))
 
-    @slash_command(name="roles_loungeone", description="Show Lounge One role buttons")
-    @application_checks.has_role("Admin")
-    async def roles_loungeone(self, interaction: Interaction):
-        embed = nextcord.Embed(
-            title="Choose Your Lounge One Roles",
-            description="Welcome to Lounge! Sign up for roles to talk about non-academic subjects! Note that the events role will ping you everytime there's an event.",
-            color=nextcord.Color.teal()
-        )
-        embed.set_image(
-            url="https://media.discordapp.net/attachments/787749899160387674/1066274148067840140/Lounge_1.png?ex=686b862f&is=686a34af&hm=725d4acc9e5d574735c268e1708a539f4de09f2d7f5f8e6dcd0f933610679629&=&width=1439&height=890"
-        )
-        await interaction.send(embed=embed, view=LoungeOne(self.bot))  # <== Not ephemeral
+        await self._post_panel(interaction, "Choose Your Lounge Two Roles", desc, nextcord.Color.teal(),
+            "https://media.discordapp.net/attachments/787749899160387674/1066274148319502417/Lounge_2.png?ex=686b862f&is=686a34af&hm=3762982f62b69009e2b0b7e5aad8041c864b856c0d8278efc8d50f724c7d5da1&=&width=1439&height=890",
+            LoungeTwo(self.bot))
 
-
-    @slash_command(name="roles_loungetwo", description="Show Lounge Two role buttons")
-    @application_checks.has_role("Admin")
-    async def roles_loungetwo(self, interaction: Interaction):
-        embed = nextcord.Embed(
-            title="Choose Your Lounge Two Roles",
-            description="Welcome to Lounge! Sign up for roles to talk about non-academic subjects! Note that the events role will ping you everytime there's an event.",
-            color=nextcord.Color.teal()
-        )
-        embed.set_image(
-            url="https://media.discordapp.net/attachments/787749899160387674/1066274148319502417/Lounge_2.png?ex=686b862f&is=686a34af&hm=3762982f62b69009e2b0b7e5aad8041c864b856c0d8278efc8d50f724c7d5da1&=&width=1439&height=890"
-        )
-        await interaction.send(embed=embed, view=LoungeTwo(self.bot))  # <== Not ephemeral
-
-
-    @slash_command(name="roles_loungethree", description="Show Lounge Three role buttons")
-    @application_checks.has_role("Admin")
-    async def roles_loungethree(self, interaction: Interaction):
-        embed = nextcord.Embed(
-            title="Choose Your Lounge Three Roles",
-            description="Welcome to Lounge! Sign up for roles to talk about non-academic subjects! Note that the events role will ping you everytime there's an event.",
-            color=nextcord.Color.teal()
-        )
-        embed.set_image(
-            url="https://media.discordapp.net/attachments/791130847461507093/1391476764072611962/image.png?ex=686c0938&is=686ab7b8&hm=1b2ee60ac99963457ce7888d2680298cefef72616c79090f130b8bc9ebc8969b&=&width=1458&height=868"
-        )
-        await interaction.send(embed=embed, view=LoungeThree(self.bot))  # <== Not ephemeral
+        await self._post_panel(interaction, "Choose Your Lounge Three Roles", desc, nextcord.Color.teal(),
+            "https://media.discordapp.net/attachments/791130847461507093/1391476764072611962/image.png?ex=686c0938&is=686ab7b8&hm=1b2ee60ac99963457ce7888d2680298cefef72616c79090f130b8bc9ebc8969b&=&width=1458&height=868",
+            LoungeThree(self.bot))
 
 
 
 
 def setup(bot):
     bot.add_cog(RoleReact(bot))
+
+
     bot.add_view(Arts(bot))
     bot.add_view(English(bot))
     bot.add_view(Languages(bot))
@@ -1186,8 +1112,9 @@ def setup(bot):
     bot.add_view(Sciences(bot))
     bot.add_view(SocialStudies(bot))
     bot.add_view(PostAP(bot))
-    bot.add_view(Pronouns(bot))
+
     bot.add_view(Booster(bot))
+
     bot.add_view(LoungeOne(bot))
     bot.add_view(LoungeTwo(bot))
     bot.add_view(LoungeThree(bot))
