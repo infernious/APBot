@@ -8,6 +8,9 @@ from nextcord import (
 )
 from nextcord.ext import commands
 from nextcord.utils import get
+from config_handler import Config
+config_path = "config.json"
+conf = Config(config_path)
 
 
 class RoleSubscribeView(ui.View):
@@ -108,7 +111,7 @@ class Events(commands.Cog):
         else:
             return f"`{role_name}` role not found in your roles."
 
-    @slash_command(name="event", description="Manage event notifications and announcements.")
+    @slash_command(name="event", description="Manage event notifications and announcements.", guild_ids=[conf.get("guild_id")])
     async def event(self, inter: Interaction):
         pass
 
@@ -145,7 +148,7 @@ class Events(commands.Cog):
         response = await self.remove_role(inter.user, "Lounge: Events")
         await inter.response.send_message(response, ephemeral=True)
 
-    @slash_command(name="qotd", description="Manage QOTD roles and announcements.")
+    @slash_command(name="qotd", description="Manage QOTD roles and announcements.", guild_ids=[conf.get("guild_id")])
     async def qotd(self, inter: Interaction):
         pass
 
@@ -212,7 +215,7 @@ class Events(commands.Cog):
         response = await self.remove_role(inter.user, role_name)
         await inter.response.send_message(response, ephemeral=True)
 
-    @slash_command(name="mc", description="Manage MC role and announcements.")
+    @slash_command(name="mc", description="Manage MC role and announcements.", guild_ids=[conf.get("guild_id")])
     async def mc(self, inter: Interaction):
         pass
 
@@ -241,12 +244,56 @@ class Events(commands.Cog):
             ephemeral=False,
         )
 
+    @slash_command(
+        name="fivehive",
+        description="Manage FiveHive announcements.",
+        guild_ids=[conf.get("guild_id")]
+    )
+    async def fivehive(self, inter: Interaction):
+        pass
+
+    @fivehive.subcommand(
+        name="announce",
+        description="Announce in fivehive-announcements (FH Role Manager only)."
+    )
+    async def fivehive_announce(self, inter: Interaction):
+        # Only FH Role Manager can run this
+        if not any(role.name == "FH Role Manager" for role in inter.user.roles):
+            return await inter.response.send_message(
+                "You do not have permission to use this command.",
+                ephemeral=True
+            )
+
+        role = get(inter.guild.roles, name="FiveHive Ping")
+        channel = get(inter.guild.channels, name="fivehive-announcements")
+
+        if not role or not channel:
+            return await inter.response.send_message(
+                "Role or channel not found. Please contact an admin.",
+                ephemeral=True
+            )
+
+        view = ConfirmPingView(
+            inter,
+            "FiveHive Ping",
+            "fivehive-announcements",
+            "FiveHive announcements"
+        )
+
+        await inter.response.send_message(
+            "Please confirm that you would like to ping the FiveHive role in the fivehive-announcements channel.",
+            view=view,
+            ephemeral=False,
+        )
+
     @commands.Cog.listener()
     async def on_ready(self):
         self.bot.add_view(RoleSubscribeView("Lounge: Events", "events"))
         self.bot.add_view(RoleSubscribeView("qotd", "qotd"))
         self.bot.add_view(RoleSubscribeView("qotd-poll", "qotd-poll"))
         self.bot.add_view(RoleSubscribeView("MC Role", "MC events"))
+
+        self.bot.add_view(RoleSubscribeView("FiveHive Ping", "FiveHive announcements"))
         print(f"Cog {self.__class__.__name__} is ready.")
 
 
