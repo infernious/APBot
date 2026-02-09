@@ -538,8 +538,7 @@ class ModerationCommands(commands.Cog):
         reason: str,
         attachment: Attachment = None,
     ):
-        await self.bot.db.base_db.add_infraction(user.id, forceban_inf)
-        await interaction.response.defer(ephemeral=False)
+
 
         forceban_inf = Infraction(
             actiontype="force-ban",
@@ -548,7 +547,9 @@ class ModerationCommands(commands.Cog):
             actiontime=datetime.now(),
             attachment_url=attachment.proxy_url if attachment else None
         )
-
+        await self.bot.db.base_db.add_infraction(user.id, forceban_inf)
+        await interaction.response.defer(ephemeral=False)
+        
         # ✅ DM first
         await self.infraction_response(interaction, member=user, infraction=forceban_inf)
 
