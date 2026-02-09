@@ -104,7 +104,7 @@ class BaseDatabase(metaclass=SingletonMeta):
             actiontime_iso = datetime.now(timezone.utc).isoformat()
 
         user_config["infractions"].append({
-            "actiontype": infraction.actiontype,          # <-- you were missing this!
+            "actiontype": infraction.actiontype,          
             "reason": infraction.reason,
             "moderator": moderator_id,
             "actiontime": actiontime_iso,
@@ -114,8 +114,8 @@ class BaseDatabase(metaclass=SingletonMeta):
         })
 
         await self.update_user_config(user_id, user_config)
-        # Award points only for /wm
-        if infraction.actiontype.lower() == "wm" and infraction.duration:
+        # Award points only for /mute
+        if infraction.actiontype.lower() == "mute" and infraction.duration:
             hours = infraction.duration / 3600  # convert seconds → hours
             if hours >= 25:
                 points = 20
