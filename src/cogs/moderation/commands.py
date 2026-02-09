@@ -250,7 +250,7 @@ class ModerationCommands(commands.Cog):
 
         # Create the Infraction object
         mute = Infraction(
-            actiontype="wm",
+            actiontype="mute",
             reason=reason,
             moderator=interaction.user,
             actiontime=datetime.now(),
