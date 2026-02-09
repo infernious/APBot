@@ -17,7 +17,10 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import Union, Optional
 from bot_base import APBot
-from cogs.utils import convert_time
+from cogs.utils import convert_time 
+from config_handler import Config
+config_path = "config.json"
+conf = Config(config_path)
 
 class Infraction:
     def __init__(
@@ -44,11 +47,12 @@ class ModerationCommands(commands.Cog):
         name="warnchannel",
         description="Send a warning to a channel and temporarily modify permissions",
         default_member_permissions=Permissions(moderate_members=True),
+        guild_ids=[conf.get("guild_id")]
     )
     async def warnchannel(
         self,
         inter: Interaction,
-        reason: str = SlashOption(description="The reason for the warning", required=False)
+        reason: str = SlashOption(description="The reason for the warning", required=False),
     ):
         await inter.response.defer(ephemeral=True)
 
@@ -188,7 +192,7 @@ class ModerationCommands(commands.Cog):
 
 
             
-    @slash_command(name="warn", description="Warn members of rule-breaking behavior.", default_member_permissions=Permissions(moderate_members=True))
+    @slash_command(name="warn", description="Warn members of rule-breaking behavior.", default_member_permissions=Permissions(moderate_members=True), guild_ids=[conf.get("guild_id")])
     async def warn(self, inter: Interaction, member: Member, reason: str = SlashOption(description="Reason for warn", required=True)):
         # Create the infraction without duration and attachment_url
         warning = Infraction(
@@ -246,7 +250,7 @@ class ModerationCommands(commands.Cog):
 
         # Create the Infraction object
         mute = Infraction(
-            actiontype="mute",
+            actiontype="wm",
             reason=reason,
             moderator=interaction.user,
             actiontime=datetime.now(),
@@ -256,7 +260,6 @@ class ModerationCommands(commands.Cog):
 
         # ✅ Add the infraction to the database BEFORE sending infraction response
         await self.bot.db.base_db.add_infraction(member.id, mute)
-
         # Calculate unmute time
         unmute_time = datetime.now() + timedelta(seconds=duration_seconds)
 
@@ -308,6 +311,7 @@ class ModerationCommands(commands.Cog):
         name="mute",
         description="Mute a member without adding infraction points.",
         default_member_permissions=Permissions(moderate_members=True),
+        guild_ids=[conf.get("guild_id")]
     )
     async def mute(
         self,
@@ -342,7 +346,6 @@ class ModerationCommands(commands.Cog):
 
         # Send the infraction response
         await self.infraction_response(interaction, member=member, infraction=mute)
-
         # Calculate unmute time
         unmute_time = datetime.now() + timedelta(seconds=duration_seconds)
 
@@ -361,6 +364,7 @@ class ModerationCommands(commands.Cog):
         name="unmute",
         description="Unmute a member.",
         default_member_permissions=Permissions(moderate_members=True),
+        guild_ids=[conf.get("guild_id")]
     )
     async def unmute(
         self,
@@ -372,6 +376,8 @@ class ModerationCommands(commands.Cog):
 
         # Remove the timeout (unmute) the member
         await member.timeout(None, reason=reason)
+
+        await self.bot.db.emergency.clear_cooldown(member.id)
 
         # Create an infraction object for logging
         unmute = Infraction(
@@ -403,6 +409,7 @@ class ModerationCommands(commands.Cog):
         name="kick",
         description="Kick members for rule-breaking behavior.",
         default_member_permissions=Permissions(kick_members=True),
+        guild_ids=[conf.get("guild_id")]
     )
     async def kick(
         self,
@@ -478,6 +485,7 @@ class ModerationCommands(commands.Cog):
         name="ban",
         description="Ban members for rule-breaking behavior.",
         default_member_permissions=Permissions(ban_members=True),
+        guild_ids=[conf.get("guild_id")]
     )
     async def ban(
         self,
@@ -521,6 +529,7 @@ class ModerationCommands(commands.Cog):
         name="force-ban",
         description="Force-ban a user by ID or mention, even if they are not in the server.",
         default_member_permissions=Permissions(ban_members=True),
+        guild_ids=[conf.get("guild_id")]
     )
     async def forceban(
         self,
@@ -570,6 +579,7 @@ class ModerationCommands(commands.Cog):
         name="unban",
         description="Unban a previously banned user by ID or mention.",
         default_member_permissions=Permissions(ban_members=True),
+        guild_ids=[conf.get("guild_id")]
     )
     async def unban(
         self,
