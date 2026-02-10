@@ -5,6 +5,11 @@ from nextcord.ext import commands
 from typing import Optional
 from bot_base import APBot
 from datetime import datetime, timedelta
+from datetime import timezone
+from config_handler import Config
+config_path = "config.json"
+conf = Config(config_path)
+
 
 def to_snowflake(value):
     if value is None:
@@ -28,6 +33,7 @@ class Infraction(commands.Cog):
     @slash_command(
         name="warnings",
         description="Show infraction history of a member.",
+        guild_ids=[conf.get("guild_id")],
         default_member_permissions=Permissions(moderate_members=True),
     )
     async def warnings(self, inter: Interaction, member: Member):
@@ -36,18 +42,18 @@ class Infraction(commands.Cog):
                 "You do not have permission to use this command.", ephemeral=True
             )
             return
-    
+
         await inter.response.defer(with_message=False)
-    
+
         infractions = await self.bot.db.base_db.get_user_infractions(member.id)
         inf_points = await self.bot.db.base_db.add_inf_points(member.id, 0)
-    
+
         if not infractions:
             await inter.followup.send(f"{member.mention} has no infractions.")
             return
-    
+
         fetching_msg = await inter.channel.send(f"Fetching {member.mention}'s warnings...")
-    
+
         color_map = {
             "warn": self.bot.colors.get("yellow", Color.yellow()),
             "mute": self.bot.colors.get("orange", Color.orange()),
@@ -57,31 +63,36 @@ class Infraction(commands.Cog):
             "force-ban": self.bot.colors.get("red", Color.red()),
             "unmute": self.bot.colors.get("green", Color.green()),
             "unban": self.bot.colors.get("green", Color.green()),
+            "note": Color.purple()
         }
-    
+
         total = len(infractions)
-    
+
         for index, inf in enumerate(infractions, start=1):
-            action = (inf.actiontype or "unknown").capitalize().replace("-", " ")
+            action = (
+                    "Internal Note"
+                    if inf.actiontype == "note"
+                    else (inf.actiontype or "unknown").capitalize().replace("-", " ")
+                )
             reason = inf.reason or "No reason provided"
-    
+
             # ---- Moderator lookup (fixed) ----
             raw_mod = getattr(inf, "moderator", None)
             moderator_id = to_snowflake(raw_mod)
-    
+
             mod = None
             if moderator_id:
                 # Try guild cache first (only if in a guild)
                 if inter.guild is not None:
                     mod = inter.guild.get_member(moderator_id)
-    
+
                 # Fallback to API fetch
                 if mod is None:
                     try:
                         mod = await self.bot.fetch_user(moderator_id)
                     except nextcord.HTTPException:
                         mod = None
-    
+
             # Build moderator display:
             # - If we found the user => mention + display name
             # - If not => still mention the ID if we have one, else show whatever was stored
@@ -94,27 +105,29 @@ class Infraction(commands.Cog):
                 else:
                     mod_line = f"{raw_mod} (unknown)" if raw_mod else "Unknown moderator"
             # -------------------------------
-    
-            # ---- Time parsing ----
+
+
+
             time_val = getattr(inf, "actiontime", None)
+
+            # if DB accidentally returned a string sometimes, parse it
             if isinstance(time_val, str):
                 try:
                     time_val = datetime.fromisoformat(time_val)
                 except ValueError:
-                    try:
-                        time_val = datetime.utcfromtimestamp(float(time_val))
-                    except Exception:
-                        time_val = datetime.utcnow()
-            elif not isinstance(time_val, datetime):
-                time_val = datetime.utcnow()
-    
-            now = datetime.now(time_val.tzinfo) if time_val.tzinfo else datetime.now()
-            timestamp = (
-                f"Yesterday at {time_val.strftime('%I:%M %p').lstrip('0')}"
-                if (now - time_val).days < 1
-                else f"{time_val.month}/{time_val.day}/{time_val.year} {time_val.strftime('%I:%M %p').lstrip('0')}"
-            )
-    
+                    time_val = datetime.now(timezone.utc)
+
+            if not isinstance(time_val, datetime):
+                time_val = datetime.now(timezone.utc)
+
+            # if naive, assume UTC
+            if time_val.tzinfo is None:
+                time_val = time_val.replace(tzinfo=timezone.utc)
+
+            unix = int(time_val.timestamp())
+            timestamp = f"<t:{unix}:F> (<t:{unix}:R>)"
+
+
             # ---- Duration ----
             duration_line = ""
             if getattr(inf, "duration", None):
@@ -127,7 +140,7 @@ class Infraction(commands.Cog):
                     duration_line = f"Duration: {hours}h\n"
                 except (ValueError, TypeError, AttributeError):
                     pass
-    
+
             embed = Embed(
                 title=action,
                 description=(
@@ -138,9 +151,10 @@ class Infraction(commands.Cog):
                 ),
                 color=color_map.get(getattr(inf, "actiontype", ""), Color.gold()),
             )
-    
+
+
             await inter.channel.send(embed=embed)
-    
+
         await fetching_msg.reply(
             f"Complete, all infractions shown! {member.mention} has `{inf_points}` infraction point(s)."
         )
@@ -148,7 +162,8 @@ class Infraction(commands.Cog):
     @slash_command(
         name="editip",
         description="Edit a member's infraction points.",
-        default_member_permissions=Permissions(moderate_members=True)
+        default_member_permissions=Permissions(moderate_members=True),
+        guild_ids=[conf.get("guild_id")]
     )
     async def editip(self, interaction: Interaction, member: Member, change: int):
         if not self.has_mod_role(interaction.user):
@@ -209,7 +224,7 @@ class Infraction(commands.Cog):
 
 #        await interaction.response.send_message("Infraction updated successfully.", ephemeral=True)
 
-    @slash_command(name="userip", description="View a member's infraction points.", default_member_permissions=Permissions(moderate_members=True))
+    @slash_command(name="userip", description="View a member's infraction points.", default_member_permissions=Permissions(moderate_members=True), guild_ids=[conf.get("guild_id")])
     async def userip(self, interaction: Interaction, member: Member):
         if not self.has_mod_role(interaction.user):
             await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
@@ -225,7 +240,7 @@ class Infraction(commands.Cog):
             await interaction.response.send_message(f"{member.mention} has {inf_points} infraction points.")
 
 
-    @slash_command(name="infpoints", description="View how many infraction points you have.")
+    @slash_command(name="infpoints", description="View how many infraction points you have.", guild_ids=[conf.get("guild_id")])
     async def infpoints(self, interaction: Interaction):
         target_id = interaction.user.id
 

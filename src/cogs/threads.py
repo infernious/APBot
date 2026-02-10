@@ -3,6 +3,9 @@ import nextcord
 from nextcord import Interaction, Embed, Object, ui, Color
 from nextcord.ext import commands
 from nextcord import slash_command
+from config_handler import Config
+config_path = "config.json"
+conf = Config(config_path)
 
 blue = Color.teal()
 

@@ -8,6 +8,9 @@ from nextcord import Embed
 import logging
 
 logger = logging.getLogger(__name__)
+from config_handler import Config
+config_path = "config.json"
+conf = Config(config_path)
 
 
 class Recurrent(commands.Cog):
@@ -22,7 +25,7 @@ class Recurrent(commands.Cog):
         return any(role.name in {"Admin", "Staff"} for role in inter.user.roles)
 
 
-    @slash_command(name="recurrent", description="Manage recurring messages")
+    @slash_command(name="recurrent", description="Manage recurring messages", guild_ids=[conf.get("guild_id")])
     async def _recurrent(self, inter: Interaction):
         await inter.response.send_message("Use subcommands to manage recurring messages.", ephemeral=True) 
         
@@ -262,7 +265,7 @@ class Recurrent(commands.Cog):
 
     @_recurrent.subcommand(
         name="remove_category", 
-        description="Remove all recurring messages from a category of channels"
+        description="Remove all recurring messages from a category of channels",
     )
     async def _recurrent_remove_category(self, inter: Interaction):
         # ✅ Authorization check

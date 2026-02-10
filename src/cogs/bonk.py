@@ -9,6 +9,9 @@ from nextcord.ext import commands
 
 from bot_base import APBot
 from cogs.utils import convert_time
+from config_handler import Config
+config_path = "config.json"
+conf = Config(config_path)
 
 
 class Bonk(commands.Cog):
@@ -27,7 +30,7 @@ class Bonk(commands.Cog):
 
         await user.send(f"Reminder! Set on <t:{start_time}:F> (<t:{start_time}:R>)\n{message or ''}")
 
-    @slash_command(name="bonk", description="Bonks Stuff")
+    @slash_command(name="bonk", description="Bonks Stuff", guild_ids=[conf.get("guild_id")])
     async def _bonk(self, inter: Interaction):
         ...
 

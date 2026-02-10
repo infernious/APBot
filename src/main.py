@@ -8,6 +8,7 @@ from bot_base import APBot
 from config_handler import Config
 from database_handler import Database
 import logging
+
 load_dotenv()
 print("Current working directory:", os.getcwd())
 
@@ -18,7 +19,6 @@ if os.path.getsize(config_path) == 0:
     raise ValueError(f"Config file is empty: {config_path}")
 
 # logging.basicConfig(level=logging.DEBUG)
-
 conf = Config(config_path)
  
 bot: APBot = APBot(
@@ -26,35 +26,36 @@ bot: APBot = APBot(
     strip_after_prefix=True,
     intents=Intents.all(),
     activity=Activity(type=ActivityType.playing, name="DM me to contact mods!"),
-    default_guild_ids=[conf.get("guild_id")],
-    
 )
 
 cogs: List[str] = [
-     "cogs.moderation.commands",  
-     "cogs.moderation.infraction",
-     "cogs.bonk",  
-     "cogs.recurrent", 
-     "cogs.tags",
-     "cogs.study",
-     "cogs.events",
-     "cogs.modmail",
-     "cogs.special",  
-     "cogs.moderation.appeal",
-     "cogs.moderation.errorhandler",
-     "cogs.moderation.decay",
-   # "cogs.threads",
-     "cogs.rolereact",
-     "cogs.logs",
-    
+    "cogs.moderation.commands",
+    "cogs.moderation.infraction",
+    "cogs.bonk",
+    "cogs.recurrent",
+    "cogs.tags",
+    "cogs.study",
+    "cogs.events",
+    "cogs.modmail",
+    "cogs.special",
+    "cogs.moderation.appeal",
+    "cogs.moderation.errorhandler",
+    "cogs.moderation.decay",
+    "cogs.rolereact",
+    "cogs.logs",
 ]
 
 @bot.event
 async def on_ready() -> None:
     print(f"Logged in as {bot.user} at {datetime.fromtimestamp(time.time()).strftime(r'%d-%b-%y, %H:%M:%S')}")
 
+    #await bot.db.emergency.emergency.delete_many({})
+   #  print("✅ Emergency cooldowns cleared")
+
 async def startup(conf: Config):
     bot.rolemenu_view_set = False
+
+    # Load all extensions
     for extension in cogs:
         try:
             bot.load_extension(extension)
@@ -64,6 +65,7 @@ async def startup(conf: Config):
 
     await bot.wait_until_ready()
 
+    # Fetch guild
     try:
         bot.guild = await bot.fetch_guild(conf.get("guild_id"))
         print(f"Fetched guild {bot.guild.name}")
@@ -72,16 +74,18 @@ async def startup(conf: Config):
 
     bot.db.bot_user_id = bot.user.id
 
+    # ✅ Sync only for this guild
     try:
-        await bot.resync_slash_commands()  # Ensure this is called
-        print("Commands resynced successfully.")
+        guild_id = conf.get("guild_id")
+        await bot.sync_application_commands(guild_id=guild_id)
+        print(f"Guild commands synced to {conf.get('guild_id')}")
     except Exception as e:
-        print(f"Failed to resync commands\n{type(e).__name__}: {e}")
+        print(f"Failed to sync commands\n{type(e).__name__}: {e}")
 
     bot.owner_ids = bot.config.get("owner_ids", [])
-
     print("All Ready")
 
+# Define colors
 default_colors = {
     "yellow": 0xFFFF00,
     "orange": 0xFFA500,

@@ -333,6 +333,64 @@ class EmergencyDatabase(BaseDatabase):
     async def clear_cooldown(self, user_id: int):
         await self.emergency.delete_one({"user_id": user_id})
 
+class EmergencyDatabase(BaseDatabase):
+    def __init__(self, conf=None):
+        super().__init__(conf)
+        self.emergency = self.database["emergency_usage"]
+
+    async def set_cooldown(self, user_id: int, minutes: int = 5):
+        """Start or reset the emergency cooldown."""
+        now = datetime.utcnow()
+        expires_at = now + timedelta(minutes=minutes)
+
+        await self.emergency.update_one(
+            {"user_id": user_id},
+            {"$set": {"expires_at": expires_at.isoformat()}},
+            upsert=True
+        )
+
+    async def is_on_cooldown(self, user_id: int) -> Optional[int]:
+        """Return UNIX timestamp of cooldown end, or None."""
+        doc = await self.emergency.find_one({"user_id": user_id})
+        if not doc:
+            return None
+
+        expires_at = datetime.fromisoformat(doc["expires_at"])
+        if datetime.utcnow() >= expires_at:
+            await self.emergency.delete_one({"user_id": user_id})
+            return None
+
+        return int(expires_at.timestamp())
+
+    async def can_use(self, user_id: int, db) -> tuple[bool, str]:
+        # 🚫 Hard ban check
+        if user_id in await db.modmail.get_banned_users():
+            return False, "You are banned from using this command."
+
+        cooldown_until = await self.is_on_cooldown(user_id)
+        if cooldown_until:
+            remaining = max(0, cooldown_until - int(datetime.utcnow().timestamp()))
+
+            hours, rem = divmod(remaining, 3600)
+            minutes, seconds = divmod(rem, 60)
+
+            if hours > 0:
+                time_str = f"{hours}h {minutes}m {seconds}s"
+            else:
+                time_str = f"{minutes}m {seconds}s"
+
+            return False, (
+                f"⏳ You are on cooldown for **{time_str}**.\n"
+                "This may be because you recently used /emergency or were muted."
+            )
+
+
+
+        return True, "" 
+    async def clear_cooldown(self, user_id: int):
+        await self.emergency.delete_one({"user_id": user_id})
+
+
 class DecayDatabase(BaseDatabase):
     def __init__(self, conf=None):
         super().__init__(conf)
