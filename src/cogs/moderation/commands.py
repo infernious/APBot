@@ -11,7 +11,7 @@ from nextcord import (
     Forbidden,
     Color,
 )
-
+from datetime import datetime, timedelta, timezone
 from nextcord.ext import commands
 import asyncio
 from datetime import datetime, timedelta
@@ -42,6 +42,9 @@ class Infraction:
 class ModerationCommands(commands.Cog):
     def __init__(self, bot: APBot) -> None:
         self.bot = bot
+    def has_mod_role(self, member: Member) -> bool:
+        allowed_roles = {"Trial Chat Moderator", "Chat Moderator", "Moderator" "Admin"}
+        return any(role.name in allowed_roles for role in member.roles)
 
     @slash_command(
         name="warnchannel",
@@ -108,6 +111,7 @@ class ModerationCommands(commands.Cog):
             "ban": ("Ban", self.bot.colors.get("red")),
             "force-ban": ("Force-Ban", self.bot.colors.get("red")),
             "unban": ("Unban", self.bot.colors.get("green")),
+            "note": ("Internal Note", Color.purple()), 
         }
 
         infraction_name, color = infraction_details.get(
@@ -618,6 +622,49 @@ class ModerationCommands(commands.Cog):
         )
         embed.set_footer(text=f"Unbanned by {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
         await interaction.followup.send(embed=embed)
+
+    @slash_command(
+        name="note",
+        description="Add an internal moderation note to a user",
+        guild_ids=[conf.get("guild_id")],
+        default_member_permissions=Permissions(moderate_members=True),
+    )
+    async def note(
+        self,
+        inter: Interaction,
+        member: Member,
+        note: str = SlashOption(
+            description="Internal note (not visible to the user)",
+            required=True,
+        ),
+    ):
+        if not self.has_mod_role(inter.user):
+            return await inter.response.send_message(
+                "You do not have permission to use this command.",
+                ephemeral=True
+            )
+
+        inf = Infraction(
+            actiontype="note",
+            reason=note,
+            moderator=inter.user,
+            actiontime=datetime.now(timezone.utc),
+            duration=None,
+            attachment_url=None,
+        )
+
+        await self.bot.db.base_db.add_infraction(member.id, inf)
+
+        embed = Embed(
+            title="Note Added",
+            description=f"**User:** {member.mention}\n**Note:**\n{note}",
+            color=0x9B59B6,  # 💜 purple
+            timestamp=datetime.utcnow(),
+        )
+        embed.set_footer(text=f"Added by {inter.user.display_name}")
+
+        await inter.response.send_message(embed=embed)
+
 
 
 

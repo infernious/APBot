@@ -6,7 +6,6 @@ from typing import Optional
 from bot_base import APBot
 from datetime import datetime, timedelta
 from datetime import timezone
-from zoneinfo import ZoneInfo
 from config_handler import Config
 config_path = "config.json"
 conf = Config(config_path)
@@ -64,12 +63,17 @@ class Infraction(commands.Cog):
             "force-ban": self.bot.colors.get("red", Color.red()),
             "unmute": self.bot.colors.get("green", Color.green()),
             "unban": self.bot.colors.get("green", Color.green()),
+            "note": Color.purple()
         }
 
         total = len(infractions)
 
         for index, inf in enumerate(infractions, start=1):
-            action = (inf.actiontype or "unknown").capitalize().replace("-", " ")
+            action = (
+                    "Internal Note"
+                    if inf.actiontype == "note"
+                    else (inf.actiontype or "unknown").capitalize().replace("-", " ")
+                )
             reason = inf.reason or "No reason provided"
 
             # ---- Moderator lookup (fixed) ----
@@ -102,8 +106,7 @@ class Infraction(commands.Cog):
                     mod_line = f"{raw_mod} (unknown)" if raw_mod else "Unknown moderator"
             # -------------------------------
 
-            # ---- Time parsing ----
-            NY = ZoneInfo("America/New_York")
+
 
             time_val = getattr(inf, "actiontime", None)
 
@@ -121,15 +124,9 @@ class Infraction(commands.Cog):
             if time_val.tzinfo is None:
                 time_val = time_val.replace(tzinfo=timezone.utc)
 
-            local_time = time_val.astimezone(NY)
-            now_local = datetime.now(NY)
+            unix = int(time_val.timestamp())
+            timestamp = f"<t:{unix}:F> (<t:{unix}:R>)"
 
-            if local_time.date() == now_local.date():
-                timestamp = f"Today at {local_time.strftime('%I:%M %p').lstrip('0')}"
-            elif local_time.date() == (now_local.date() - timedelta(days=1)):
-                timestamp = f"Yesterday at {local_time.strftime('%I:%M %p').lstrip('0')}"
-            else:
-                timestamp = f"{local_time.month}/{local_time.day}/{local_time.year} {local_time.strftime('%I:%M %p').lstrip('0')}"
 
             # ---- Duration ----
             duration_line = ""
@@ -154,6 +151,7 @@ class Infraction(commands.Cog):
                 ),
                 color=color_map.get(getattr(inf, "actiontype", ""), Color.gold()),
             )
+
 
             await inter.channel.send(embed=embed)
 
