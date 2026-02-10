@@ -221,6 +221,117 @@ class InfractionDatabase:
     async def get_user_infractions(self, user_id: int):
         # return a list of Infraction objects (or dicts)
         ...
+class EmergencyDatabase(BaseDatabase):
+    def __init__(self, conf=None):
+        super().__init__(conf)
+        self.emergency = self.database["emergency_usage"]
+
+    async def log_usage(self, user_id: int) -> None:
+        """Record an emergency usage event and set a 5-minute timeout."""
+        now = datetime.utcnow()
+        expires_at = now + timedelta(minutes=5)  # ⏰ Changed from 24 hours to 5 minutes
+
+        await self.emergency.update_one(
+            {"user_id": user_id},
+            {"$set": {
+                "last_used": now.isoformat(),
+                "expires_at": expires_at.isoformat(),
+                "notified": False
+            }},
+            upsert=True
+        )
+
+    async def is_on_cooldown(self, user_id: int) -> bool:
+        """Check if the user is still within their 5-minute timeout."""
+        doc = await self.emergency.find_one({"user_id": user_id})
+        if not doc or "expires_at" not in doc:
+            return False
+
+        expires_at = datetime.fromisoformat(doc["expires_at"])
+        return datetime.utcnow() < expires_at
+
+    async def set_notified(self, user_id: int):
+        """Mark user as notified (after sending DM)."""
+        await self.emergency.update_one({"user_id": user_id}, {"$set": {"notified": True}})
+
+    async def get_expired_users(self) -> list[int]:
+        """Return list of users whose cooldowns expired (for cleanup)."""
+        now = datetime.utcnow()
+        cursor = self.emergency.find({"expires_at": {"$lte": now}})
+        return [doc["user_id"] async for doc in cursor]
+
+    async def clear_expired(self):
+        """Remove expired cooldown entries."""
+        now = datetime.utcnow()
+        await self.emergency.delete_many({"expires_at": {"$lte": now}})
+
+    async def can_use(self, user_id: int, db) -> tuple[bool, str]:
+        now = datetime.utcnow()
+
+        # 1) Check if user is banned from modmail
+        banned_users = await db.modmail.get_banned_users()
+        if user_id in banned_users:
+            return False, "You are banned from using this command."
+
+        # 2) Check emergency cooldown
+        doc = await self.emergency.find_one({"user_id": user_id})
+        emergency_end = None
+        if doc and "expires_at" in doc:
+            try:
+                emergency_end = datetime.fromisoformat(doc["expires_at"])
+            except:
+                emergency_end = None
+
+        # 3) Check mute cooldown (from infractions), capped at 5 minutes
+        infractions = await db.base_db.get_user_infractions(user_id)
+        mute_end = None
+
+        for inf in infractions:
+            # ensure actiontime is parsed correctly
+            if isinstance(inf.actiontime, str):
+                try:
+                    inf.actiontime = datetime.fromisoformat(inf.actiontime.replace("Z", "+00:00"))
+                except:
+                    inf.actiontime = now
+
+            if inf.actiontype.lower() in ("mute", "wm") and inf.duration:
+                end_time = inf.actiontime + timedelta(seconds=inf.duration)
+                # cap mute cooldown at 5 min max
+                end_time_capped = min(end_time, now + timedelta(minutes=5))
+                if end_time_capped > now:
+                    if not mute_end or end_time_capped > mute_end:
+                        mute_end = end_time_capped
+
+        # 4) If no cooldowns at all
+        if not mute_end and not emergency_end:
+            return True, ""
+
+        # Determine the latest active cooldown
+        final_end = max(x for x in [mute_end, emergency_end] if x)
+
+        # ✅ FIX: if cooldown already expired → allow
+        if final_end < now:
+            return True, ""
+
+        # Calculate remaining
+        remaining_seconds = int((final_end - now).total_seconds())
+
+        # Cap displayed cooldown message at 5 minutes max
+        if remaining_seconds > 5 * 60:
+            remaining_seconds = 5 * 60
+            final_end = now + timedelta(seconds=remaining_seconds)
+
+        # Return cooldown message
+        return False, (
+            f"You are on cooldown for <t:{int(final_end.timestamp())}:R>.\n"
+            f"This may be because you recently used /emergency or are muted."
+        )
+
+
+
+
+    async def clear_cooldown(self, user_id: int):
+        await self.emergency.delete_one({"user_id": user_id})
 
 class EmergencyDatabase(BaseDatabase):
     def __init__(self, conf=None):
