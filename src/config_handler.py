@@ -1,6 +1,8 @@
 import orjson
 
 class Config:
+    _printed = False  # class-level flag
+
     def __init__(self, file_path: str):
         self.file_path = file_path
         self.config = {}
@@ -12,7 +14,10 @@ class Config:
                 content = f.read()
                 if not content.strip():
                     raise ValueError("Config file is empty")
-                print(f"Config file contents: {content}")  # Debug print
+                # print only once across all instances
+                if not Config._printed:
+                    print(f"Config file contents: {content}")
+                    Config._printed = True
                 self.config = orjson.loads(content)
         except FileNotFoundError:
             raise FileNotFoundError(f"Config file not found: {self.file_path}")

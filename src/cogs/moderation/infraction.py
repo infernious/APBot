@@ -1,10 +1,27 @@
 import nextcord
+import re
 from nextcord import slash_command, Permissions, Interaction, User, Embed, Member, TextChannel, Object, Color
 from nextcord.ext import commands
 from typing import Optional
 from bot_base import APBot
 from datetime import datetime, timedelta
+from datetime import timezone
+from zoneinfo import ZoneInfo
+from config_handler import Config
+config_path = "config.json"
+conf = Config(config_path)
 
+
+def to_snowflake(value):
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        m = re.search(r"\d{17,20}", value)
+        if m:
+            return int(m.group(0))
+    return None
 
 class Infraction(commands.Cog):
     def __init__(self, bot: APBot) -> None:
@@ -17,14 +34,18 @@ class Infraction(commands.Cog):
     @slash_command(
         name="warnings",
         description="Show infraction history of a member.",
-        default_member_permissions=Permissions(moderate_members=True)
+        guild_ids=[conf.get("guild_id")],
+        default_member_permissions=Permissions(moderate_members=True),
     )
     async def warnings(self, inter: Interaction, member: Member):
         if not self.has_mod_role(inter.user):
-            await inter.response.send_message("You do not have permission to use this command.", ephemeral=True)
+            await inter.response.send_message(
+                "You do not have permission to use this command.", ephemeral=True
+            )
             return
 
         await inter.response.defer(with_message=False)
+
         infractions = await self.bot.db.base_db.get_user_infractions(member.id)
         inf_points = await self.bot.db.base_db.add_inf_points(member.id, 0)
 
@@ -48,30 +69,76 @@ class Infraction(commands.Cog):
         total = len(infractions)
 
         for index, inf in enumerate(infractions, start=1):
-            action = inf.actiontype.capitalize().replace("-", " ")
+            action = (inf.actiontype or "unknown").capitalize().replace("-", " ")
             reason = inf.reason or "No reason provided"
 
-            mod = inter.guild.get_member(inf.moderator) or await self.bot.fetch_user(inf.moderator)
-            mod_tag = f"{mod.global_name}#{mod.discriminator}" if hasattr(mod, "global_name") else f"{mod.name}#{mod.discriminator}"
-            mod_line = f"{mod.mention if mod else f'<@{inf.moderator}>'} ({mod_tag})"
+            # ---- Moderator lookup (fixed) ----
+            raw_mod = getattr(inf, "moderator", None)
+            moderator_id = to_snowflake(raw_mod)
 
-            time = inf.actiontime
-            if isinstance(time, str):
+            mod = None
+            if moderator_id:
+                # Try guild cache first (only if in a guild)
+                if inter.guild is not None:
+                    mod = inter.guild.get_member(moderator_id)
+
+                # Fallback to API fetch
+                if mod is None:
+                    try:
+                        mod = await self.bot.fetch_user(moderator_id)
+                    except nextcord.HTTPException:
+                        mod = None
+
+            # Build moderator display:
+            # - If we found the user => mention + display name
+            # - If not => still mention the ID if we have one, else show whatever was stored
+            if mod:
+                display = getattr(mod, "global_name", None) or mod.name
+                mod_line = f"{mod.mention} ({display})"
+            else:
+                if moderator_id:
+                    mod_line = f"<@{moderator_id}> (unknown)"
+                else:
+                    mod_line = f"{raw_mod} (unknown)" if raw_mod else "Unknown moderator"
+            # -------------------------------
+
+            # ---- Time parsing ----
+            NY = ZoneInfo("America/New_York")
+
+            time_val = getattr(inf, "actiontime", None)
+
+            # if DB accidentally returned a string sometimes, parse it
+            if isinstance(time_val, str):
                 try:
-                    time = datetime.fromisoformat(time)
+                    time_val = datetime.fromisoformat(time_val)
                 except ValueError:
-                    time = datetime.utcfromtimestamp(float(time))
+                    time_val = datetime.now(timezone.utc)
 
-            timestamp = (
-                f"Yesterday at {time.strftime('%I:%M %p').lstrip('0')}"
-                if (datetime.now() - time).days < 1
-                else f"{time.month}/{time.day}/{time.year} {time.strftime('%I:%M %p').lstrip('0')}"
-            )
+            if not isinstance(time_val, datetime):
+                time_val = datetime.now(timezone.utc)
 
+            # if naive, assume UTC
+            if time_val.tzinfo is None:
+                time_val = time_val.replace(tzinfo=timezone.utc)
+
+            local_time = time_val.astimezone(NY)
+            now_local = datetime.now(NY)
+
+            if local_time.date() == now_local.date():
+                timestamp = f"Today at {local_time.strftime('%I:%M %p').lstrip('0')}"
+            elif local_time.date() == (now_local.date() - timedelta(days=1)):
+                timestamp = f"Yesterday at {local_time.strftime('%I:%M %p').lstrip('0')}"
+            else:
+                timestamp = f"{local_time.month}/{local_time.day}/{local_time.year} {local_time.strftime('%I:%M %p').lstrip('0')}"
+
+            # ---- Duration ----
             duration_line = ""
-            if inf.duration:
+            if getattr(inf, "duration", None):
                 try:
-                    duration_seconds = int(inf.duration.total_seconds()) if isinstance(inf.duration, timedelta) else int(inf.duration)
+                    dur = inf.duration
+                    duration_seconds = (
+                        int(dur.total_seconds()) if isinstance(dur, timedelta) else int(dur)
+                    )
                     hours = duration_seconds // 3600
                     duration_line = f"Duration: {hours}h\n"
                 except (ValueError, TypeError, AttributeError):
@@ -85,7 +152,7 @@ class Infraction(commands.Cog):
                     f"Responsible Mod: {mod_line}\n"
                     f"{index}/{total} infractions • {timestamp}"
                 ),
-                color=color_map.get(inf.actiontype, Color.gold())
+                color=color_map.get(getattr(inf, "actiontype", ""), Color.gold()),
             )
 
             await inter.channel.send(embed=embed)
@@ -93,11 +160,12 @@ class Infraction(commands.Cog):
         await fetching_msg.reply(
             f"Complete, all infractions shown! {member.mention} has `{inf_points}` infraction point(s)."
         )
-
+        
     @slash_command(
         name="editip",
         description="Edit a member's infraction points.",
-        default_member_permissions=Permissions(moderate_members=True)
+        default_member_permissions=Permissions(moderate_members=True),
+        guild_ids=[conf.get("guild_id")]
     )
     async def editip(self, interaction: Interaction, member: Member, change: int):
         if not self.has_mod_role(interaction.user):
@@ -158,7 +226,7 @@ class Infraction(commands.Cog):
 
 #        await interaction.response.send_message("Infraction updated successfully.", ephemeral=True)
 
-    @slash_command(name="userip", description="View a member's infraction points.", default_member_permissions=Permissions(moderate_members=True))
+    @slash_command(name="userip", description="View a member's infraction points.", default_member_permissions=Permissions(moderate_members=True), guild_ids=[conf.get("guild_id")])
     async def userip(self, interaction: Interaction, member: Member):
         if not self.has_mod_role(interaction.user):
             await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
@@ -174,7 +242,7 @@ class Infraction(commands.Cog):
             await interaction.response.send_message(f"{member.mention} has {inf_points} infraction points.")
 
 
-    @slash_command(name="infpoints", description="View how many infraction points you have.")
+    @slash_command(name="infpoints", description="View how many infraction points you have.", guild_ids=[conf.get("guild_id")])
     async def infpoints(self, interaction: Interaction):
         target_id = interaction.user.id
 

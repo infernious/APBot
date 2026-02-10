@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 load_dotenv()
 import random
 from datetime import datetime, timedelta
+from datetime import timezone
 import asyncio
 from typing import List, Optional, Union
 import time
@@ -15,6 +16,7 @@ import logging
 from typing import Optional
 logger = logging.getLogger(__name__)
 from dateutil import parser
+
 
 
 class SingletonMeta(type):
@@ -86,23 +88,51 @@ class BaseDatabase(metaclass=SingletonMeta):
             print(f"Error updating user config for user_id {user_id}: {e}")
             
     async def add_infraction(self, user_id: int, infraction: Infraction):
-        # Assuming you have a method to get user data
         user_config = await self.read_user_config(user_id)
-        
-        # Append new infraction to infractions list
-        if "infractions" not in user_config:
-            user_config["infractions"] = []
+        user_config.setdefault("infractions", [])
+
+        # moderator can be Member or int
+        moderator_id = infraction.moderator.id if hasattr(infraction.moderator, "id") else int(infraction.moderator)
+
+        # actiontime: store UTC ISO with tzinfo
+        if isinstance(infraction.actiontime, datetime):
+            dt = infraction.actiontime
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)  # assume legacy naive is UTC
+            actiontime_iso = dt.astimezone(timezone.utc).isoformat()
+        else:
+            actiontime_iso = datetime.now(timezone.utc).isoformat()
+
         user_config["infractions"].append({
-            "actiontype": infraction.actiontype,
+            "actiontype": infraction.actiontype,          
             "reason": infraction.reason,
-            "moderator": infraction.moderator.id,
-            "actiontime": infraction.actiontime.isoformat(),
+            "moderator": moderator_id,
+            "actiontime": actiontime_iso,
             "duration": infraction.duration,
-            "attachment_url": infraction.attachment_url
+            "attachment_url": infraction.attachment_url,
+            "update": infraction.update if hasattr(infraction, "update") else [],
         })
-        
-        # Save user data with updated infractions
+
         await self.update_user_config(user_id, user_config)
+        # Award points only for /mute
+        if infraction.actiontype.lower() == "mute" and infraction.duration:
+            hours = infraction.duration / 3600  # convert seconds → hours
+            if hours >= 25:
+                points = 20
+            elif hours >= 12:
+                points = 15
+            elif hours >= 6:
+                points = 10
+            elif hours >= 3:
+                points = 5
+            else:
+                points = 0
+
+            if points > 0:
+                await self.add_inf_points(user_id, points)
+                print(f"[DB] Added {points} infraction points to {user_id} for a {hours:.1f}h wm.")
+
+
 
     async def get_user_infractions(self, user_id: int) -> list:
         user_config = await self.read_user_config(user_id)
@@ -131,7 +161,21 @@ class BaseDatabase(metaclass=SingletonMeta):
             # Convert ISO strings safely to datetime objects
             try:
                 if isinstance(cleaned["actiontime"], str):
-                    cleaned["actiontime"] = datetime.fromisoformat(cleaned["actiontime"])
+                    try:
+                        dt = datetime.fromisoformat(cleaned["actiontime"])
+                    except Exception:
+                        dt = datetime.now(timezone.utc)
+
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    cleaned["actiontime"] = dt
+
+                elif isinstance(cleaned["actiontime"], datetime):
+                    dt = cleaned["actiontime"]
+                    if dt.tzinfo is None:
+                        cleaned["actiontime"] = dt.replace(tzinfo=timezone.utc)
+                else:
+                    cleaned["actiontime"] = datetime.now(timezone.utc)
             except Exception:
                 cleaned["actiontime"] = datetime.utcnow()
 
@@ -177,6 +221,64 @@ class InfractionDatabase:
     async def get_user_infractions(self, user_id: int):
         # return a list of Infraction objects (or dicts)
         ...
+
+class EmergencyDatabase(BaseDatabase):
+    def __init__(self, conf=None):
+        super().__init__(conf)
+        self.emergency = self.database["emergency_usage"]
+
+    async def set_cooldown(self, user_id: int, minutes: int = 5):
+        """Start or reset the emergency cooldown."""
+        now = datetime.utcnow()
+        expires_at = now + timedelta(minutes=minutes)
+
+        await self.emergency.update_one(
+            {"user_id": user_id},
+            {"$set": {"expires_at": expires_at.isoformat()}},
+            upsert=True
+        )
+
+    async def is_on_cooldown(self, user_id: int) -> Optional[int]:
+        """Return UNIX timestamp of cooldown end, or None."""
+        doc = await self.emergency.find_one({"user_id": user_id})
+        if not doc:
+            return None
+
+        expires_at = datetime.fromisoformat(doc["expires_at"])
+        if datetime.utcnow() >= expires_at:
+            await self.emergency.delete_one({"user_id": user_id})
+            return None
+
+        return int(expires_at.timestamp())
+
+    async def can_use(self, user_id: int, db) -> tuple[bool, str]:
+        # 🚫 Hard ban check
+        if user_id in await db.modmail.get_banned_users():
+            return False, "You are banned from using this command."
+
+        cooldown_until = await self.is_on_cooldown(user_id)
+        if cooldown_until:
+            remaining = max(0, cooldown_until - int(datetime.utcnow().timestamp()))
+
+            hours, rem = divmod(remaining, 3600)
+            minutes, seconds = divmod(rem, 60)
+
+            if hours > 0:
+                time_str = f"{hours}h {minutes}m {seconds}s"
+            else:
+                time_str = f"{minutes}m {seconds}s"
+
+            return False, (
+                f"⏳ You are on cooldown for **{time_str}**.\n"
+                "This may be because you recently used /emergency or were muted."
+            )
+
+
+
+        return True, "" 
+    async def clear_cooldown(self, user_id: int):
+        await self.emergency.delete_one({"user_id": user_id})
+
 
 class DecayDatabase(BaseDatabase):
     def __init__(self, conf=None):
@@ -576,6 +678,7 @@ class Database:
     def __init__(self, conf: Config) -> None:
         self.base_db = BaseDatabase(conf)
         self.infraction : InfractionDatabase = InfractionDatabase(self.base_db)
+        self.emergency: EmergencyDatabase = EmergencyDatabase()
         self.modmail: ModmailDatabase = ModmailDatabase(conf)
         self.decay = DecayDatabase(conf)
         self.study: StudyDatabase = StudyDatabase()

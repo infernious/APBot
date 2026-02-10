@@ -2,6 +2,9 @@ import re
 from nextcord import Embed, Interaction, SlashOption, slash_command, Attachment
 from nextcord.ext import commands
 from bot_base import APBot  # Ensure this is imported correctly
+from config_handler import Config
+config_path = "config.json"
+conf = Config(config_path)
 
 # Only these roles can run the commands
 REQUIRED_ROLES = {"Honorable", "Chat Moderator", "Admin"}
@@ -14,7 +17,7 @@ class Tags(commands.Cog):
         """Check if the user has at least one of the required roles."""
         return any(role.name in REQUIRED_ROLES for role in inter.user.roles)
 
-    @slash_command(name="tag", description="Manage tags")
+    @slash_command(name="tag", description="Manage tags", guild_ids=[conf.get("guild_id")])
     async def _tag(self, inter: Interaction):
         pass  # Root command
 

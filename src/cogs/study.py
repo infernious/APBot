@@ -10,6 +10,9 @@ from typing import Union
 from cogs.utils import convert_time
 
 blue = nextcord.Color.teal()
+from config_handler import Config
+config_path = "config.json"
+conf = Config(config_path)
 
 
 class QuestionConfirm(nextcord.ui.View):
@@ -50,7 +53,7 @@ class Study(commands.Cog):
         self.potd_cooldowns = {}
         
 
-    @slash_command(name="question", description="Ask a question in a subject channel.")
+    @slash_command(name="question", description="Ask a question in a subject channel.", guild_ids=[conf.get("guild_id")])
     async def question(
         self,
         inter: Interaction,
@@ -103,7 +106,7 @@ class Study(commands.Cog):
 
 
 
-    @slash_command(name="potd", description="Make a problem-of-the-day for a subject channel.")
+    @slash_command(name="potd", description="Make a problem-of-the-day for a subject channel.", guild_ids=[conf.get("guild_id")])
     async def potd(
         self,
         inter: Interaction,
@@ -185,7 +188,7 @@ class Study(commands.Cog):
         await self.bot.db.study.delete_user(user_id)
         await user.remove_roles(study_role)
 
-    @slash_command(name="study", description="Prevent yourself from viewing unhelpful channels.")
+    @slash_command(name="study", description="Prevent yourself from viewing unhelpful channels.", guild_ids=[conf.get("guild_id")])
     async def study(
         self,
         inter: Interaction,

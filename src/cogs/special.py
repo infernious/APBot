@@ -2,13 +2,15 @@ from nextcord import Interaction, Member, SlashOption, slash_command
 from nextcord.ext import commands
 
 from bot_base import APBot
-
+from config_handler import Config
+config_path = "config.json"
+conf = Config(config_path)
 
 class SpecialPerms(commands.Cog):
     def __init__(self, bot: APBot) -> None:
         self.bot = bot
 
-    @slash_command(name="esclude", description="Forbid a member from viewing #emotional-support")
+    @slash_command(name="esclude", description="Forbid a member from viewing #emotional-support", guild_ids=[conf.get("guild_id")])
     async def _bonk(
         self,
         inter: Interaction,
