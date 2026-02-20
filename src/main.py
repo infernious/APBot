@@ -29,6 +29,7 @@ bot: APBot = APBot(
 )
 
 cogs: List[str] = [
+     "cogs.logs", 
      "cogs.moderation.commands",  
      "cogs.moderation.infraction",
      "cogs.bonk",  
@@ -42,8 +43,9 @@ cogs: List[str] = [
      "cogs.moderation.errorhandler",
      "cogs.moderation.decay",
      "cogs.rolereact",
-     "cogs.logs",
      "cogs.boostrolemanager",
+     "cogs.role_log",
+     "cogs.voice_log",
 ]
 
 @bot.event
@@ -102,6 +104,7 @@ bot.colors = default_colors
 
 bot.config = conf
 bot.db = Database(conf)
+
 
 bot.loop.create_task(startup(bot.config))
 bot.run(os.getenv("APBOT_BOT_TOKEN"))

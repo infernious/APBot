@@ -68,23 +68,24 @@ class Logs(commands.Cog):
         with open("config.json", "r") as f:
             config = json.load(f)
 
+
         self.bot_logs_channel_id = config.get("bot_logs_channel")
 
         # Set global exception hook once
         sys.excepthook = self.handle_exception
 
-        # Only redirect once globally
-        global already_redirected
-        if not already_redirected:
-            self.bot.loop.create_task(self.redirect_output())
-            already_redirected = True
+    # @commands.Cog.listener()
+    # async def on_ready(self):
+    #     """Redirect output only after bot is fully ready."""
+    #     global already_redirected
+    #     if not already_redirected:
+    #         await self.redirect_output()
+    #         already_redirected = True
 
-    async def redirect_output(self):
-        await self.bot.wait_until_ready()
-
-        # Redirect stdout/stderr to Discord
-        sys.stdout = StreamToDiscord(self.bot, self.bot_logs_channel_id, "STDOUT")
-        sys.stderr = StreamToDiscord(self.bot, self.bot_logs_channel_id, "STDERR")
+    # async def redirect_output(self):
+    #     # Remove the wait_until_ready() call since we're already ready
+    #     sys.stdout = StreamToDiscord(self.bot, self.bot_logs_channel_id, "STDOUT")
+    #     sys.stderr = StreamToDiscord(self.bot, self.bot_logs_channel_id, "STDERR")
 
     def handle_exception(self, exc_type, exc_value, exc_traceback):
         if issubclass(exc_type, KeyboardInterrupt):
