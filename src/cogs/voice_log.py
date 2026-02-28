@@ -1,3 +1,5 @@
+from enum import member
+
 import nextcord
 from nextcord.ext import commands
 from bot_base import APBot
@@ -12,6 +14,9 @@ class VoiceLogCog(commands.Cog):
             config = json.load(f)
         
         self.voice_logs_channel_id = config.get("voice_logs_channel")
+
+        self._last_move_by = None
+        self._last_one_moved = None
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member: nextcord.Member, before: nextcord.VoiceState, after: nextcord.VoiceState):
@@ -32,29 +37,57 @@ class VoiceLogCog(commands.Cog):
 
             # VC Leave
             elif before.channel is not None and after.channel is None:
-                embed = nextcord.Embed(
-                    description=f"{member.mention} left **{before.channel.mention}**",
-                    color=nextcord.Color.red()
-                )
+                disconnected_by = None
+                now = nextcord.utils.utcnow()
+                try:
+                    async for entry in member.guild.audit_logs(limit=5, action=nextcord.AuditLogAction.member_disconnect):
+                        age = (now - entry.created_at).total_seconds()
+                        if age < 5:
+                            disconnected_by = entry.user.mention
+                            break
+                except Exception:
+                    pass
+
+                if disconnected_by:
+                    embed = nextcord.Embed(
+                        description=f"{member.mention} was disconnected from **{before.channel.mention}** by {disconnected_by}",
+                        color=nextcord.Color.red()
+                    )
+                else:
+                    embed = nextcord.Embed(
+                        description=f"{member.mention} left **{before.channel.mention}**",
+                        color=nextcord.Color.red()
+                    )
                 embed.set_author(name=member.name, icon_url=member.avatar.url)
                 embed.set_footer(text=f"Member ID: {member.id} • {nextcord.utils.utcnow().strftime('%Y-%m-%d %I:%M %p UTC')}")
                 await logs_channel.send(embed=embed)
 
             # VC Move (unknown if user moved themselves)
             elif before.channel != after.channel and before.channel is not None and after.channel is not None:
-                moved_by = "Unknown"
+                moved_by = "SPAM"
+                now = nextcord.utils.utcnow()
                 try:
                     async for entry in member.guild.audit_logs(limit=5, action=nextcord.AuditLogAction.member_move):
-                        if entry.target.id == member.id:
+                        age = (now - entry.created_at).total_seconds()
+                        if age < 2:
                             moved_by = entry.user.mention
+                            self._last_move_by = entry.user.id
+                            self._last_one_moved = member.id
                             break
-                except Exception:
-                    pass
-                
-                embed = nextcord.Embed(
-                    description=f"{member.mention} was moved from **{before.channel.mention}** to **{after.channel.mention}**  by: {moved_by}",
-                    color=nextcord.Color.blue()
-                )
+                except Exception as e:
+                    print(f"Error fetching audit logs: {type(e).__name__}: {e}")
+
+                embed = None
+                if moved_by == "SPAM":
+                    embed = nextcord.Embed(
+                        description=f"{member.mention} was moved from **{before.channel.mention}** to **{after.channel.mention}**. But they are either being moved around rapidly or are moving themselves, and thus the bot is unable to determine mover.",
+                        color=nextcord.Color.blue()
+                    )
+                else:
+                    embed = nextcord.Embed(
+                        description=f"{member.mention} was moved from **{before.channel.mention}** to **{after.channel.mention}**  by: {moved_by}",
+                        color=nextcord.Color.blue()
+                    )
                 embed.set_author(name=member.name, icon_url=member.avatar.url)
                 embed.set_footer(text=f"Member ID: {member.id} • {nextcord.utils.utcnow().strftime('%Y-%m-%d %I:%M %p UTC')}")
                 await logs_channel.send(embed=embed)
