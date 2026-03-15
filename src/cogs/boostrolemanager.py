@@ -18,13 +18,39 @@ class BoostTracker(commands.Cog):
         self.booster_role_name = "Nitro Booster"
         self.started_cleanup = False
 
-    async def cleanup_guild_nitro_roles(self, guild: nextcord.Guild):
-        booster_role = nextcord.utils.get(guild.roles, name=self.booster_role_name)
+    def get_booster_role(self, guild: nextcord.Guild):
+        return nextcord.utils.get(guild.roles, name=self.booster_role_name)
 
-        nitro_roles = [
-            role for role in guild.roles
-            if role.name in self.nitro_role_names
-        ]
+    def get_nitro_roles_from_member(self, member: nextcord.Member):
+        return [role for role in member.roles if role.name in self.nitro_role_names]
+
+    async def enforce_member_nitro_roles(self, member: nextcord.Member, reason: str):
+        booster_role = self.get_booster_role(member.guild)
+        nitro_roles = self.get_nitro_roles_from_member(member)
+
+        if not nitro_roles:
+            return False
+
+        has_booster_role = booster_role in member.roles if booster_role else False
+        if has_booster_role:
+            return False
+
+        try:
+            await member.remove_roles(*nitro_roles, reason=reason)
+            print(
+                f"[BoostTracker] Removed {[r.name for r in nitro_roles]} "
+                f"from {member} ({member.id}) | Reason: {reason}"
+            )
+            return True
+        except Forbidden as e:
+            print(f"[BoostTracker] Missing permissions for {member}: {e}")
+        except HTTPException as e:
+            print(f"[BoostTracker] HTTP error for {member}: {e}")
+
+        return False
+
+    async def cleanup_guild_nitro_roles(self, guild: nextcord.Guild):
+        nitro_roles = [role for role in guild.roles if role.name in self.nitro_role_names]
 
         if not nitro_roles:
             print(f"[BoostTracker] No nitro roles found in {guild.name}")
@@ -39,33 +65,12 @@ class BoostTracker(commands.Cog):
                     continue
                 processed_members.add(member.id)
 
-                has_booster_role = booster_role in member.roles if booster_role else False
-
-                if has_booster_role:
-                    continue
-
-                roles_to_remove = [
-                    role for role in member.roles
-                    if role.name in self.nitro_role_names
-                ]
-
-                if not roles_to_remove:
-                    continue
-
-                try:
-                    await member.remove_roles(
-                        *roles_to_remove,
-                        reason="User has nitro role(s) but is not currently boosting"
-                    )
+                removed = await self.enforce_member_nitro_roles(
+                    member,
+                    reason="Startup/manual nitro-role cleanup"
+                )
+                if removed:
                     removed_count += 1
-                    print(
-                        f"[BoostTracker] Removed {[r.name for r in roles_to_remove]} "
-                        f"from {member} ({member.id}) in {guild.name}"
-                    )
-                except Forbidden as e:
-                    print(f"[BoostTracker] Missing permissions for {member}: {e}")
-                except HTTPException as e:
-                    print(f"[BoostTracker] HTTP error for {member}: {e}")
 
                 await asyncio.sleep(0.1)
 
@@ -77,7 +82,7 @@ class BoostTracker(commands.Cog):
             return
 
         self.started_cleanup = True
-        print("[BoostTracker] Bot ready. Starting nitro role cleanup...")
+        print("[BoostTracker] Bot ready. Starting nitro cleanup...")
 
         for guild in self.bot.guilds:
             await self.cleanup_guild_nitro_roles(guild)
@@ -86,35 +91,17 @@ class BoostTracker(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_update(self, before: nextcord.Member, after: nextcord.Member):
-        booster_role = nextcord.utils.get(after.guild.roles, name=self.booster_role_name)
-        if booster_role is None:
+        before_role_ids = {role.id for role in before.roles}
+        after_role_ids = {role.id for role in after.roles}
+
+
+        if before_role_ids == after_role_ids:
             return
 
-        before_has_booster = booster_role in before.roles
-        after_has_booster = booster_role in after.roles
-
-        if before_has_booster and not after_has_booster:
-            roles_to_remove = [
-                role for role in after.roles
-                if role.name in self.nitro_role_names
-            ]
-
-            if not roles_to_remove:
-                return
-
-            try:
-                await after.remove_roles(
-                    *roles_to_remove,
-                    reason="User stopped boosting"
-                )
-                print(
-                    f"[BoostTracker] Removed {[r.name for r in roles_to_remove]} "
-                    f"from {after} ({after.id}) after boost ended"
-                )
-            except Forbidden as e:
-                print(f"[BoostTracker] Missing permissions for {after}: {e}")
-            except HTTPException as e:
-                print(f"[BoostTracker] HTTP error for {after}: {e}")
+        await self.enforce_member_nitro_roles(
+            after,
+            reason="Member has nitro role(s) without Nitro Booster"
+        )
 
     @commands.command(name="syncboostroles")
     @commands.has_permissions(administrator=True)
