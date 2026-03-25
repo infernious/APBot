@@ -15,7 +15,6 @@ from models import Infraction
 import logging
 from typing import Optional
 logger = logging.getLogger(__name__)
-from dateutil import parser
 
 
 
@@ -152,7 +151,7 @@ class BaseDatabase(metaclass=SingletonMeta):
 
             # 🧩 Fill defaults for missing fields
             cleaned.setdefault("reason", "No reason provided")
-            cleaned.setdefault("actiontime", datetime.utcnow().isoformat())
+            cleaned.setdefault("actiontime", datetime.now(timezone.utc).isoformat())
             cleaned.setdefault("duration", None)
             cleaned.setdefault("attachment_url", None)
             cleaned.setdefault("update", [])
@@ -177,7 +176,7 @@ class BaseDatabase(metaclass=SingletonMeta):
                 else:
                     cleaned["actiontime"] = datetime.now(timezone.utc)
             except Exception:
-                cleaned["actiontime"] = datetime.utcnow()
+                cleaned["actiontime"] = datetime.now(timezone.utc)
 
             cleaned_infractions.append(Infraction(**cleaned))
 

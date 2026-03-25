@@ -23,6 +23,8 @@ class Config:
             raise FileNotFoundError(f"Config file not found: {self.file_path}")
         except orjson.JSONDecodeError as e:
             raise ValueError(f"Failed to decode JSON from {self.file_path}: {e}")
+        except ValueError:
+            raise
         except Exception as e:
             raise RuntimeError(f"An unexpected error occurred while reading the config file: {e}")
 

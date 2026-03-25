@@ -2,3 +2,5 @@ orjson
 nextcord
 motor
 jishaku==2.4.0
+python-dotenv
+pytest
