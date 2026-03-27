@@ -17,10 +17,11 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import Union, Optional
 from bot_base import APBot
+from app_config import get_command_guild_ids, load_optional_config
 from cogs.utils import convert_time 
-from config_handler import Config
-config_path = "config.json"
-conf = Config(config_path)
+
+conf = load_optional_config()
+COMMAND_GUILD_IDS = get_command_guild_ids(conf)
 
 class Infraction:
     def __init__(
@@ -43,14 +44,14 @@ class ModerationCommands(commands.Cog):
     def __init__(self, bot: APBot) -> None:
         self.bot = bot
     def has_mod_role(self, member: Member) -> bool:
-        allowed_roles = {"Trial Chat Moderator", "Chat Moderator", "Moderator" "Admin"}
+        allowed_roles = {"Trial Chat Moderator", "Chat Moderator", "Moderator", "Admin"}
         return any(role.name in allowed_roles for role in member.roles)
 
     @slash_command(
         name="warnchannel",
         description="Send a warning to a channel and temporarily modify permissions",
         default_member_permissions=Permissions(moderate_members=True),
-        guild_ids=[conf.get("guild_id")]
+        guild_ids=COMMAND_GUILD_IDS
     )
     async def warnchannel(
         self,
@@ -196,7 +197,7 @@ class ModerationCommands(commands.Cog):
 
 
             
-    @slash_command(name="warn", description="Warn members of rule-breaking behavior.", default_member_permissions=Permissions(moderate_members=True), guild_ids=[conf.get("guild_id")])
+    @slash_command(name="warn", description="Warn members of rule-breaking behavior.", default_member_permissions=Permissions(moderate_members=True), guild_ids=COMMAND_GUILD_IDS)
     async def warn(self, inter: Interaction, member: Member, reason: str = SlashOption(description="Reason for warn", required=True)):
         # Create the infraction without duration and attachment_url
         warning = Infraction(
@@ -227,7 +228,7 @@ class ModerationCommands(commands.Cog):
         name="wm",
         description="Mute and add infraction points to a member.",
         default_member_permissions=Permissions(moderate_members=True),
-        guild_ids=[conf.get("guild_id")]
+        guild_ids=COMMAND_GUILD_IDS
     )
     async def wm(
         self,
@@ -317,7 +318,7 @@ class ModerationCommands(commands.Cog):
         name="mute",
         description="Mute a member without adding infraction points.",
         default_member_permissions=Permissions(moderate_members=True),
-        guild_ids=[conf.get("guild_id")]
+        guild_ids=COMMAND_GUILD_IDS
     )
     async def mute(
         self,
@@ -370,7 +371,7 @@ class ModerationCommands(commands.Cog):
         name="unmute",
         description="Unmute a member.",
         default_member_permissions=Permissions(moderate_members=True),
-        guild_ids=[conf.get("guild_id")]
+        guild_ids=COMMAND_GUILD_IDS
     )
     async def unmute(
         self,
@@ -415,7 +416,7 @@ class ModerationCommands(commands.Cog):
         name="kick",
         description="Kick members for rule-breaking behavior.",
         default_member_permissions=Permissions(kick_members=True),
-        guild_ids=[conf.get("guild_id")]
+        guild_ids=COMMAND_GUILD_IDS
     )
     async def kick(
         self,
@@ -491,7 +492,7 @@ class ModerationCommands(commands.Cog):
         name="ban",
         description="Ban members for rule-breaking behavior.",
         default_member_permissions=Permissions(ban_members=True),
-        guild_ids=[conf.get("guild_id")]
+        guild_ids=COMMAND_GUILD_IDS
     )
     async def ban(
         self,
@@ -535,7 +536,7 @@ class ModerationCommands(commands.Cog):
         name="force-ban",
         description="Force-ban a user by ID or mention, even if they are not in the server.",
         default_member_permissions=Permissions(ban_members=True),
-        guild_ids=[conf.get("guild_id")]
+        guild_ids=COMMAND_GUILD_IDS
     )
     async def forceban(
         self,
@@ -587,7 +588,7 @@ class ModerationCommands(commands.Cog):
         name="unban",
         description="Unban a previously banned user by ID or mention.",
         default_member_permissions=Permissions(ban_members=True),
-        guild_ids=[conf.get("guild_id")]
+        guild_ids=COMMAND_GUILD_IDS
     )
     async def unban(
         self,
@@ -626,7 +627,7 @@ class ModerationCommands(commands.Cog):
     @slash_command(
         name="note",
         description="Add an internal moderation note to a user",
-        guild_ids=[conf.get("guild_id")],
+        guild_ids=COMMAND_GUILD_IDS,
         default_member_permissions=Permissions(moderate_members=True),
     )
     async def note(

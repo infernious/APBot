@@ -4,11 +4,12 @@ from nextcord import slash_command, Permissions, Interaction, User, Embed, Membe
 from nextcord.ext import commands
 from typing import Optional
 from bot_base import APBot
+from app_config import get_command_guild_ids, load_optional_config
 from datetime import datetime, timedelta
 from datetime import timezone
-from config_handler import Config
-config_path = "config.json"
-conf = Config(config_path)
+
+conf = load_optional_config()
+COMMAND_GUILD_IDS = get_command_guild_ids(conf)
 
 
 def to_snowflake(value):
@@ -33,7 +34,7 @@ class Infraction(commands.Cog):
     @slash_command(
         name="warnings",
         description="Show infraction history of a member.",
-        guild_ids=[conf.get("guild_id")],
+        guild_ids=COMMAND_GUILD_IDS,
         default_member_permissions=Permissions(moderate_members=True),
     )
     async def warnings(self, inter: Interaction, member: Member):
@@ -163,7 +164,7 @@ class Infraction(commands.Cog):
         name="editip",
         description="Edit a member's infraction points.",
         default_member_permissions=Permissions(moderate_members=True),
-        guild_ids=[conf.get("guild_id")]
+        guild_ids=COMMAND_GUILD_IDS
     )
     async def editip(self, interaction: Interaction, member: Member, change: int):
         if not self.has_mod_role(interaction.user):
@@ -224,7 +225,7 @@ class Infraction(commands.Cog):
 
 #        await interaction.response.send_message("Infraction updated successfully.", ephemeral=True)
 
-    @slash_command(name="userip", description="View a member's infraction points.", default_member_permissions=Permissions(moderate_members=True), guild_ids=[conf.get("guild_id")])
+    @slash_command(name="userip", description="View a member's infraction points.", default_member_permissions=Permissions(moderate_members=True), guild_ids=COMMAND_GUILD_IDS)
     async def userip(self, interaction: Interaction, member: Member):
         if not self.has_mod_role(interaction.user):
             await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
@@ -240,7 +241,7 @@ class Infraction(commands.Cog):
             await interaction.response.send_message(f"{member.mention} has {inf_points} infraction points.")
 
 
-    @slash_command(name="infpoints", description="View how many infraction points you have.", guild_ids=[conf.get("guild_id")])
+    @slash_command(name="infpoints", description="View how many infraction points you have.", guild_ids=COMMAND_GUILD_IDS)
     async def infpoints(self, interaction: Interaction):
         target_id = interaction.user.id
 
