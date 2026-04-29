@@ -666,7 +666,99 @@ class ModerationCommands(commands.Cog):
 
         await inter.response.send_message(embed=embed)
 
+    def has_exam_moderator_role(self, member: Member) -> bool:
+        return any(role.name == "Exam Moderator" for role in member.roles)
 
+    @slash_command(
+        name="restrict",
+        description="Give a member the Restricted role.",
+        guild_ids=COMMAND_GUILD_IDS,
+    )
+    async def restrict(
+        self,
+        inter: Interaction,
+        user: Member = SlashOption(
+            name="user",
+            description="The user to restrict.",
+            required=True,
+        ),
+    ):
+        await inter.response.defer(ephemeral=True)
+
+        if not isinstance(inter.user, Member):
+            return await inter.followup.send(
+                "This command can only be used in the server.",
+                ephemeral=True,
+            )
+
+        if not self.has_exam_moderator_role(inter.user):
+            return await inter.followup.send(
+                "You need the **Exam Moderator** role to use this command.",
+                ephemeral=True,
+            )
+
+        restricted_role = nextcord.utils.get(inter.guild.roles, name="Restricted")
+
+        if restricted_role is None:
+            return await inter.followup.send(
+                "I could not find a role called **Restricted**.",
+                ephemeral=True,
+            )
+
+        bot_member = inter.guild.me
+
+        if bot_member is None:
+            return await inter.followup.send(
+                "I could not check my own server permissions.",
+                ephemeral=True,
+            )
+
+        if restricted_role >= bot_member.top_role:
+            return await inter.followup.send(
+                "I cannot assign the **Restricted** role because it is higher than or equal to my highest role.",
+                ephemeral=True,
+            )
+
+        if user.top_role >= bot_member.top_role:
+            return await inter.followup.send(
+                "I cannot restrict this user because their highest role is higher than or equal to mine.",
+                ephemeral=True,
+            )
+
+        if restricted_role in user.roles:
+            return await inter.followup.send(
+                f"{user.mention} already has the **Restricted** role.",
+                ephemeral=True,
+            )
+
+        try:
+            await user.add_roles(
+                restricted_role,
+                reason=f"Restricted by {inter.user} using /restrict",
+            )
+        except Forbidden:
+            return await inter.followup.send(
+                "I do not have permission to give this user the **Restricted** role.",
+                ephemeral=True,
+            )
+        except nextcord.HTTPException as exc:
+            return await inter.followup.send(
+                f"Failed to restrict this user: `{exc}`",
+                ephemeral=True,
+            )
+
+        embed = Embed(
+            title="Member Restricted",
+            description=f"{user.mention} has been given the **Restricted** role.",
+            color=self.bot.colors.get("red", Color.red()),
+            timestamp=datetime.now(timezone.utc),
+        )
+        embed.set_footer(
+            text=f"Restricted by {inter.user.display_name}",
+            icon_url=inter.user.display_avatar.url,
+        )
+
+        await inter.followup.send(embed=embed, ephemeral=True)
 
 
 
