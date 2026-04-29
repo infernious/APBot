@@ -19,6 +19,7 @@ DEFAULT_COGS = [
     "cogs.boostrolemanager",
     "cogs.role_log",
     "cogs.voice_log",
+    "cogs.exams_automation.day_zero_complete",
 ]
 
 
