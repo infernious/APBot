@@ -12,9 +12,8 @@ from nextcord import (
     Color,
 )
 from datetime import datetime, timedelta, timezone
-from nextcord.ext import commands
+from nextcord.ext import commands, tasks
 import asyncio
-from datetime import datetime, timedelta
 from typing import Union, Optional
 from bot_base import APBot
 from app_config import get_command_guild_ids, load_optional_config
@@ -43,6 +42,11 @@ class Infraction:
 class ModerationCommands(commands.Cog):
     def __init__(self, bot: APBot) -> None:
         self.bot = bot
+        if not self.restricted_cleanup_loop.is_running():
+            self.restricted_cleanup_loop.start()
+    def cog_unload(self) -> None:
+        if self.restricted_cleanup_loop.is_running():
+            self.restricted_cleanup_loop.cancel()
     def has_mod_role(self, member: Member) -> bool:
         allowed_roles = {"Trial Chat Moderator", "Chat Moderator", "Moderator", "Admin"}
         return any(role.name in allowed_roles for role in member.roles)
@@ -669,9 +673,165 @@ class ModerationCommands(commands.Cog):
     def has_exam_moderator_role(self, member: Member) -> bool:
         return any(role.name == "Exam Moderator" for role in member.roles)
 
+    def restricted_collection(self):
+        return self.bot.db.base_db.database["temporary_restrictions"]
+
+    async def save_temporary_restriction(
+        self,
+        *,
+        guild_id: int,
+        user_id: int,
+        role_id: int,
+        moderator_id: int,
+        expires_at: int,
+    ) -> None:
+        await self.restricted_collection().update_one(
+            {
+                "guild_id": guild_id,
+                "user_id": user_id,
+            },
+            {
+                "$set": {
+                    "guild_id": guild_id,
+                    "user_id": user_id,
+                    "role_id": role_id,
+                    "moderator_id": moderator_id,
+                    "expires_at": expires_at,
+                    "updated_at": int(datetime.now(timezone.utc).timestamp()),
+                }
+            },
+            upsert=True,
+        )
+
+    async def delete_temporary_restriction(self, guild_id: int, user_id: int) -> None:
+        await self.restricted_collection().delete_one(
+            {
+                "guild_id": guild_id,
+                "user_id": user_id,
+            }
+        )
+
+    async def remove_restricted_role(self, guild_id: int, user_id: int) -> None:
+        """
+        Remove Restricted role after the saved 48-hour timer expires.
+        This checks Mongo first, so old timers will not remove newer restrictions.
+        """
+        try:
+            doc = await self.restricted_collection().find_one(
+                {
+                    "guild_id": guild_id,
+                    "user_id": user_id,
+                }
+            )
+
+            if not doc:
+                return
+
+            now_ts = int(datetime.now(timezone.utc).timestamp())
+            expires_at = int(doc.get("expires_at", 0))
+
+            if now_ts < expires_at:
+                remaining = expires_at - now_ts
+                self.bot.loop.call_later(
+                    remaining,
+                    lambda: asyncio.create_task(
+                        self.remove_restricted_role(guild_id, user_id)
+                    ),
+                )
+                return
+
+            guild = self.bot.get_guild(guild_id)
+
+            if guild is None:
+                try:
+                    guild = await self.bot.fetch_guild(guild_id)
+                except Exception:
+                    return
+
+            role_id = int(doc.get("role_id", 0))
+            restricted_role = guild.get_role(role_id)
+
+            if restricted_role is None:
+                restricted_role = nextcord.utils.get(guild.roles, name="Restricted")
+
+            if restricted_role is None:
+                await self.delete_temporary_restriction(guild_id, user_id)
+                return
+
+            try:
+                member = guild.get_member(user_id)
+
+                if member is None:
+                    member = await guild.fetch_member(user_id)
+
+            except nextcord.NotFound:
+                await self.delete_temporary_restriction(guild_id, user_id)
+                return
+
+            except Exception:
+                return
+
+            if restricted_role in member.roles:
+                await member.remove_roles(
+                    restricted_role,
+                    reason="Automatic Restricted role removal after 48 hours.",
+                )
+
+            await self.delete_temporary_restriction(guild_id, user_id)
+
+            logs_channel = nextcord.utils.get(guild.text_channels, name="logs")
+
+            if logs_channel:
+                embed = Embed(
+                    title="Member Restriction Expired!",
+                    description=(
+                        f"{member.mention} no longer has the **Restricted** role.\n\n"
+                        "**Reason:**\n48 hour restriction expired."
+                    ),
+                    color=self.bot.colors.get("green", Color.green()),
+                    timestamp=datetime.now(timezone.utc),
+                )
+                embed.set_footer(text="Automatic restriction cleanup")
+                await logs_channel.send(embed=embed)
+
+        except Exception as exc:
+            print(f"[Restrict] Failed to remove Restricted role for {user_id}: {exc}")
+
+    @tasks.loop(minutes=5)
+    async def restricted_cleanup_loop(self):
+        """
+        Backup cleanup.
+
+        This makes restrictions survive bot restarts.
+        Even if call_later gets lost from a restart, this loop checks Mongo.
+        """
+        try:
+            now_ts = int(datetime.now(timezone.utc).timestamp())
+
+            cursor = self.restricted_collection().find(
+                {
+                    "expires_at": {
+                        "$lte": now_ts,
+                    }
+                }
+            )
+
+            async for doc in cursor:
+                guild_id = int(doc.get("guild_id"))
+                user_id = int(doc.get("user_id"))
+
+                await self.remove_restricted_role(guild_id, user_id)
+
+        except Exception as exc:
+            print(f"[Restrict Cleanup] Loop failed: {exc}")
+
+    @restricted_cleanup_loop.before_loop
+    async def before_restricted_cleanup_loop(self):
+        await self.bot.wait_until_ready()
+
     @slash_command(
         name="restrict",
-        description="Give a member the Restricted role.",
+        description="Give a member the Restricted role for 48 hours.",
         guild_ids=COMMAND_GUILD_IDS,
     )
     async def restrict(
@@ -683,19 +843,22 @@ class ModerationCommands(commands.Cog):
             required=True,
         ),
     ):
-        await inter.response.defer(ephemeral=True)
-
+        # Permission checks FIRST.
+        # This keeps denial messages private.
         if not isinstance(inter.user, Member):
-            return await inter.followup.send(
+            return await inter.response.send_message(
                 "This command can only be used in the server.",
                 ephemeral=True,
             )
 
         if not self.has_exam_moderator_role(inter.user):
-            return await inter.followup.send(
+            return await inter.response.send_message(
                 "You need the **Exam Moderator** role to use this command.",
                 ephemeral=True,
             )
+
+        # Only defer publicly after the user is allowed to use the command.
+        await inter.response.defer(ephemeral=False)
 
         restricted_role = nextcord.utils.get(inter.guild.roles, name="Restricted")
 
@@ -725,40 +888,88 @@ class ModerationCommands(commands.Cog):
                 ephemeral=True,
             )
 
-        if restricted_role in user.roles:
-            return await inter.followup.send(
-                f"{user.mention} already has the **Restricted** role.",
-                ephemeral=True,
-            )
+        duration_seconds = 60
+        restricted_end = int(datetime.now(timezone.utc).timestamp()) + duration_seconds
+        already_restricted = restricted_role in user.roles
 
         try:
-            await user.add_roles(
-                restricted_role,
-                reason=f"Restricted by {inter.user} using /restrict",
+            if not already_restricted:
+                await user.add_roles(
+                    restricted_role,
+                    reason=None,
+                )
+
+            await self.save_temporary_restriction(
+                guild_id=inter.guild.id,
+                user_id=user.id,
+                role_id=restricted_role.id,
+                moderator_id=inter.user.id,
+                expires_at=restricted_end,
             )
+
+            self.bot.loop.call_later(
+                duration_seconds,
+                lambda: asyncio.create_task(
+                    self.remove_restricted_role(inter.guild.id, user.id)
+                ),
+            )
+
         except Forbidden:
             return await inter.followup.send(
                 "I do not have permission to give this user the **Restricted** role.",
                 ephemeral=True,
             )
+
         except nextcord.HTTPException as exc:
             return await inter.followup.send(
                 f"Failed to restrict this user: `{exc}`",
                 ephemeral=True,
             )
 
-        embed = Embed(
-            title="Member Restricted",
-            description=f"{user.mention} has been given the **Restricted** role.",
+        except Exception as exc:
+            return await inter.followup.send(
+                f"Failed to save the temporary restriction: `{exc}`",
+                ephemeral=True,
+            )
+
+        if already_restricted:
+            title = "Member Restriction Updated!"
+        else:
+            title = "Member Restricted!"
+
+        restrict_embed = Embed(
+            title=title,
+            description=(
+                f"{user.mention} has been given the **Restricted** role.\n\n"
+                f"**Duration:**\n48 hours\n\n"
+                f"**Restriction ends:** <t:{restricted_end}:f> (<t:{restricted_end}:R>)"
+            ),
             color=self.bot.colors.get("red", Color.red()),
             timestamp=datetime.now(timezone.utc),
         )
-        embed.set_footer(
+
+        restrict_embed.set_footer(
             text=f"Restricted by {inter.user.display_name}",
             icon_url=inter.user.display_avatar.url,
         )
 
-        await inter.followup.send(embed=embed, ephemeral=True)
+        await inter.followup.send(embed=restrict_embed)
+
+        logs_channel = nextcord.utils.get(inter.guild.text_channels, name="logs")
+
+        if logs_channel:
+            log_embed = Embed(
+                title="Restriction Logged",
+                description=(
+                    f"User: {user.mention} (`{user.id}`)\n"
+                    f"Moderator: {inter.user.mention}\n"
+                    f"Expires: <t:{restricted_end}:f> (<t:{restricted_end}:R>)"
+                ),
+                color=self.bot.colors.get("red", Color.red()),
+                timestamp=datetime.now(timezone.utc),
+            )
+
+            await logs_channel.send(embed=log_embed)
 
 
 
