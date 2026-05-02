@@ -61,16 +61,16 @@ NONESSENTIAL_TEXT_CHANNEL_ALIASES: Dict[str, Tuple[str, ...]] = {
 }
 
 STUDY_TEXT_CHANNEL_IDS = [
-    1498714556275490941,  # study-room-1
-    1498714556275490942,  # study-room-2
+    1236801357277565009,  # study-room-1
+    1236801379142471700,  # study-room-2
 ]
 
 # Old IDs preserved from your older automation.
 STUDY_SESSION_VC_IDS = [
-    1498714556275490943,
-    1498714556275490944,
-    1498714556275490945,
-    1498714556275490946,
+    1498313504757645494,
+    1498313547028107445,
+    1498313642985390241,
+    1498313820786135203,
 ]
 
 DEFAULT_STUDY_SESSION_NAMES = [
@@ -87,8 +87,24 @@ CATEGORY_ALIASES: Dict[str, Tuple[str, ...]] = {
     "lecture": ("Lecture Stages",),
     "subjects": ("Subject Channels",),
     "season_misc": ("AP Exams 2026",),
+    "fivehive": ("FiveHive",),
 }
 
+NO_STATUS_MESSAGE_CHANNELS = {
+    "contest-submission1",
+    "contest-submission2",
+    "contest-submission3",
+    "fivehive-announcements",
+    "social-media-posts",
+    "fivehive-issues-and-suggestions",
+}
+
+FIVEHIVE_TESTING_ONLY_CHANNELS = {
+    "fivehive-announcements",
+    "social-media-posts",
+    "fivehive-issues-and-suggestions",
+    "fivehive-questions",
+}
 
 
 
@@ -460,6 +476,32 @@ class APChannel:
             return True
 
         return False
+    def is_events_channel(self) -> bool:
+        events_category = get_category(self.guild, CATEGORY_ALIASES["events"])
+        if events_category and self.channel.category_id == events_category.id:
+            return True
+        return False
+    def _events_roles_to_toggle(self) -> List[nextcord.Role]:
+        roles: List[nextcord.Role] = []
+
+        for target in self.channel.overwrites:
+            if not isinstance(target, nextcord.Role):
+                continue
+
+            if is_staff_role(target):
+                continue
+
+            lowered = target.name.lower()
+
+            if "lounge" in lowered or "mc" in lowered:
+                if target not in roles:
+                    roles.append(target)
+
+        # For mc-server-announcements, also close @everyone so nobody sees it.
+        if normalize(self.channel.name) == "mc-server-announcements":
+            roles.append(self.guild.default_role)
+
+        return roles
 
     def _role_by_name(self, role_name: str) -> Optional[nextcord.Role]:
         wanted = normalize(role_name)
@@ -510,7 +552,7 @@ class APChannel:
             ):
                 should_include = True
 
-            if include_lounge and "lounge:" in lowered:
+            if include_lounge and "lounge" in lowered:
                 should_include = True
 
             if should_include and target not in roles:
@@ -536,6 +578,13 @@ class APChannel:
         # Lounge category should use Lounge: roles, not @everyone.
         if self.is_lounge_channel():
             return self._lounge_roles_to_toggle()
+
+        if self.is_events_channel():
+            event_roles = self._events_roles_to_toggle()
+            if event_roles:
+                return event_roles
+
+            return [self.guild.default_role]
 
         # Explicit role-gated channels.
         explicit_roles = self._explicit_role_gate_roles()
@@ -580,6 +629,9 @@ class APChannel:
         return False
 
     def _can_send_status_message(self) -> bool:
+        if normalize(self.channel.name) in {normalize(name) for name in NO_STATUS_MESSAGE_CHANNELS}:
+            return False
+
         return isinstance(self.channel, nextcord.TextChannel)
 
     def _is_voice_like_channel(self) -> bool:
@@ -667,6 +719,19 @@ class APChannel:
             or overwrite.send_messages is False
             or overwrite.read_message_history is False
         )
+    def _role_has_any_explicit_deny(self, role: nextcord.Role) -> bool:
+        overwrite = self.channel.overwrites_for(role)
+
+        values = [
+            overwrite.view_channel,
+            overwrite.read_messages,
+            overwrite.send_messages,
+            overwrite.read_message_history,
+            overwrite.connect,
+            overwrite.speak,
+        ]
+
+        return any(value is False for value in values)
 
     async def _send_status_embed(
         self,
@@ -886,6 +951,7 @@ class APChannel:
         roles_needing_open = [
             role for role in roles
             if not self._role_can_effectively_access(role)
+            or self._role_has_any_explicit_deny(role)
         ]
 
         # Keep @everyone blocked on role-gated channels, but don't count that
@@ -1027,6 +1093,23 @@ class ExamAutomationManager:
                 await wrapped.open(report, reason)
             else:
                 await wrapped.close(report, reason)
+            
+    async def ensure_fivehive_testing_only_channels(
+        self,
+        guild: nextcord.Guild,
+        *,
+        opened: bool,
+        report: ActionReport,
+        reason: str,
+    ) -> None:
+        for channel_name in FIVEHIVE_TESTING_ONLY_CHANNELS:
+            await self.ensure_channel_state(
+                guild,
+                (channel_name,),
+                opened=opened,
+                report=report,
+                reason=reason,
+            )
 
     async def ensure_study_voice_channels(
         self,
@@ -1125,6 +1208,14 @@ class ExamAutomationManager:
             reason=reason,
             exclude_names=set(),
         )
+        await self.ensure_category_state(
+            guild,
+            "fivehive",
+            opened=True,
+            report=report,
+            reason=reason,
+            exclude_names=set(),
+        )
 
         for always_open in ALWAYS_OPEN_CHANNELS:
             await self.ensure_channel_state(guild, (always_open,), opened=True, report=report, reason=reason)
@@ -1174,6 +1265,14 @@ class ExamAutomationManager:
             report=report,
             reason=reason,
         )
+        await self.ensure_category_state(
+            guild,
+            "fivehive",
+            opened=False,
+            report=report,
+            reason=reason,
+            exclude_names=FIVEHIVE_TESTING_ONLY_CHANNELS,
+        )
 
         for always_open in ALWAYS_OPEN_CHANNELS:
             await self.ensure_channel_state(guild, (always_open,), opened=True, report=report, reason=reason)
@@ -1220,7 +1319,14 @@ class ExamAutomationManager:
             report=report,
             reason=reason,
         )
-
+        await self.ensure_category_state(
+            guild,
+            "fivehive",
+            opened=False,
+            report=report,
+            reason=reason,
+            exclude_names=set(),
+        )
         # Keep these explicitly open as failsafes.
         for always_open in ALWAYS_OPEN_CHANNELS:
             await self.ensure_channel_state(guild, (always_open,), opened=True, report=report, reason=reason)
@@ -1280,8 +1386,23 @@ class ExamAutomationManager:
         )
         await self.ensure_category_state(
             guild,
+            "fivehive",
+            opened=not state.nonessential_closed,
+            report=report,
+            reason=reason,
+            exclude_names=FIVEHIVE_TESTING_ONLY_CHANNELS,
+        )
+        await self.ensure_category_state(
+            guild,
             "voice",
             opened=not state.nonessential_closed,
+            report=report,
+            reason=reason,
+        )
+
+        await self.ensure_fivehive_testing_only_channels(
+            guild,
+            opened=state.essential_open,
             report=report,
             reason=reason,
         )
