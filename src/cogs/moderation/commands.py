@@ -888,7 +888,7 @@ class ModerationCommands(commands.Cog):
                 ephemeral=True,
             )
 
-        duration_seconds = 60
+        duration_seconds = 60 * 60 * 48
         restricted_end = int(datetime.now(timezone.utc).timestamp()) + duration_seconds
         already_restricted = restricted_role in user.roles
 
