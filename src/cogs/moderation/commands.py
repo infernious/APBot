@@ -893,6 +893,8 @@ class ModerationCommands(commands.Cog):
         restricted_end = int(datetime.now(timezone.utc).timestamp()) + duration_seconds
         already_restricted = restricted_role in user.roles
 
+        dm_success = True
+
         try:
             if not already_restricted:
                 await user.add_roles(
@@ -914,6 +916,26 @@ class ModerationCommands(commands.Cog):
                     self.remove_restricted_role(inter.guild.id, user.id)
                 ),
             )
+
+            try:
+                dm_embed = Embed(
+                    title="Your account is under review",
+                    description=(
+                        "You have been restricted from the server because your account "
+                        "is currently under review for a possible violation of an AP exam security-related rule. \n\n"
+                        "This review may last up to 48 hours."
+                    ),
+                    color=self.bot.colors.get("red", Color.red()),
+                    timestamp=datetime.now(timezone.utc),
+                )
+                dm_embed.set_footer(text="AP Students Moderation")
+
+                await user.send(embed=dm_embed)
+
+            except Forbidden:
+                dm_success = False
+            except Exception:
+                dm_success = False
 
         except Forbidden:
             return await inter.followup.send(
@@ -949,6 +971,12 @@ class ModerationCommands(commands.Cog):
             timestamp=datetime.now(timezone.utc),
         )
 
+        restrict_embed.add_field(
+            name="DM Status",
+            value="✅ DM sent" if dm_success else "❌ Could not DM",
+            inline=False,
+        )
+
         restrict_embed.set_footer(
             text=f"Restricted by {inter.user.display_name}",
             icon_url=inter.user.display_avatar.url,
@@ -964,7 +992,8 @@ class ModerationCommands(commands.Cog):
                 description=(
                     f"User: {user.mention} (`{user.id}`)\n"
                     f"Moderator: {inter.user.mention}\n"
-                    f"Expires: <t:{restricted_end}:f> (<t:{restricted_end}:R>)"
+                    f"Expires: <t:{restricted_end}:f> (<t:{restricted_end}:R>)\n"
+                    f"DM Status: {'✅ DM sent' if dm_success else '❌ Could not DM'}"
                 ),
                 color=self.bot.colors.get("red", Color.red()),
                 timestamp=datetime.now(timezone.utc),
@@ -976,3 +1005,5 @@ class ModerationCommands(commands.Cog):
 
 async def setup(bot: APBot) -> None:
     bot.add_cog(ModerationCommands(bot))
+
+
