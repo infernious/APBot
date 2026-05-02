@@ -42,6 +42,7 @@ class Infraction:
 class ModerationCommands(commands.Cog):
     def __init__(self, bot: APBot) -> None:
         self.bot = bot
+    def cog_load(self) -> None:
         if not self.restricted_cleanup_loop.is_running():
             self.restricted_cleanup_loop.start()
     def cog_unload(self) -> None:
