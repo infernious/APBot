@@ -26,6 +26,7 @@ class ExamAutomation(commands.Cog):
         self._last_signature: Optional[tuple] = None
         self._test_task: Optional[asyncio.Task] = None
         self._test_active: bool = False
+        self._manual_override_active: bool = False
 
         # Auto-start the protocol loop.
         #
@@ -98,7 +99,8 @@ class ExamAutomation(commands.Cog):
         guild = self.manager.get_guild()
         if guild is None:
             return "Guild not found."
-
+        if self._manual_override_active and not force:
+            return "Skipped protocol sync because manual override mode is active."
         if self._test_active and not force:
             return "Skipped protocol sync because a Day Zero / Day One test is currently active."
 
@@ -357,6 +359,7 @@ class ExamAutomation(commands.Cog):
                 guild,
                 reason=f"Manual close_all_channels by {inter.user}",
             )
+            self._manual_override_active = True
             self._last_signature = None
             await inter.followup.send(
                 report.to_text("Emergency close all channels"),
@@ -390,6 +393,7 @@ class ExamAutomation(commands.Cog):
             return
 
         try:
+            self._manual_override_active = False
             state = build_protocol_state()
             report = await self.manager.apply_protocol(
                 guild,
@@ -424,6 +428,7 @@ class ExamAutomation(commands.Cog):
         )
 
         try:
+            self._manual_override_active = False
             summary = await self._sync_protocol_now(force=True)
             await inter.followup.send(summary, ephemeral=True)
         except Exception as exc:
