@@ -753,7 +753,10 @@ class RecurrentDatabase(BaseDatabase):
         return channel_dict if channel_dict else {"messages": [], "message_counts": {}, "limit": 0}
 
     async def remove_message(self, channel_id: int, message: str) -> None:
-        await self.recurrent.update_one({"channel_id": channel_id}, {"$pull": {"messages": message}, "$unset": {f"message_counts.{message}": ""}})
+        await self.recurrent.update_one(
+            {"channel_id": channel_id},
+            {"$pull": {"messages": message}},
+        )
 
     async def update_message_count(self, channel_id: int, message: str, count: int) -> None:
         await self.recurrent.update_one({"channel_id": channel_id}, {"$set": {f"message_counts.{message}": count}})
@@ -780,7 +783,10 @@ class RecurrentDatabase(BaseDatabase):
         return category_dict if category_dict else {"messages": [], "message_counts": {}, "limit": 0}
 
     async def remove_category_message(self, category_id: int, message: str) -> None:
-        await self.recurrent.update_one({"category_id": category_id}, {"$pull": {"messages": message}, "$unset": {f"message_counts.{message}": ""}})
+        await self.recurrent.update_one(
+            {"category_id": category_id},
+            {"$pull": {"messages": message}},
+        )
     async def clear_channel_data(self, channel_id: int) -> None:
         await self.recurrent.delete_one({"channel_id": channel_id})
 
