@@ -21,8 +21,8 @@ class Recurrent(commands.Cog):
         self.activity_threshold = 10  
         self.category_threshold = 10  
     def _is_authorized(self, inter: Interaction) -> bool:
-        """Return True if the invoking member has Admin or Staff."""
-        return any(role.name in {"Admin", "Staff"} for role in inter.user.roles)
+        """Return True if the invoking member has Admin or Moderator."""
+        return any(role.name in {"Admin", "Moderator"} for role in inter.user.roles)
 
 
     @slash_command(name="recurrent", description="Manage recurring messages", guild_ids=[conf.get("guild_id")])
