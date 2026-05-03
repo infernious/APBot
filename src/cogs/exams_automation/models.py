@@ -106,6 +106,11 @@ FIVEHIVE_TESTING_ONLY_CHANNELS = {
     "fivehive-questions",
 }
 
+READ_ONLY_CHANNELS = {
+    "fivehive-announcements",
+    "social-media-posts",
+    "mc-server-announcements",
+}
 
 
 SUBJECT_CHANNEL_ALIASES: Dict[str, Tuple[str, ...]] = {
@@ -819,12 +824,15 @@ class APChannel:
     ) -> None:
         """
         Main reopen attempt.
+
         """
+        is_read_only = normalize(self.channel.name) in READ_ONLY_CHANNELS
+
         await self.channel.set_permissions(
             target,
             view_channel=True,
             read_messages=True,
-            send_messages=True,
+            send_messages=False if is_read_only else True,
             connect=True,
             speak=True,
             read_message_history=True,
@@ -840,11 +848,12 @@ class APChannel:
         """
         Backup reopen attempt.
 
-        This undoes backup lockdown permissions.
         """
+        is_read_only = normalize(self.channel.name) in READ_ONLY_CHANNELS
+
         await self.channel.set_permissions(
             target,
-            send_messages=True,
+            send_messages=False if is_read_only else True,
             connect=True,
             speak=True,
             read_message_history=True,
