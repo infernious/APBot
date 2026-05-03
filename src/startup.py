@@ -20,6 +20,7 @@ DEFAULT_COGS = [
     "cogs.role_log",
     "cogs.voice_log",
     "cogs.exams_automation.day_zero_complete",
+    "cogs.delete_log",
 ]
 
 
