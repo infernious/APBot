@@ -15,7 +15,11 @@ class APBot(commands.Bot):
     config: Config
     colors: dict
     rolemenu_view_set: bool
-
+    
+    def __init__(self, *args, **kwargs):
+        kwargs["enable_debug_events"] = True
+        super().__init__(*args, **kwargs)
+        
     async def getch_guild(self, guild_id: int) -> Optional[Guild]:
         """Looks up a guild in cache or fetches if not found."""
         guild: Union[Guild, None] = self.get_guild(guild_id)
