@@ -11,12 +11,126 @@ from bot_base import APBot
 
 
 LOG_CHANNEL_NAME = "leak-log"
-LEAK_WORD_RE = re.compile(r"\bleak\b", re.IGNORECASE)
+
+MONITORED_KEYWORDS: tuple[str, ...] = (
+    "leak",
+    "leaks",
+    "leaked",
+    "leaking",
+    "l3ak",
+    "l3aks",
+    "le@k",
+    "le@ks",
+    "|eak",
+    "l e a k",
+    "leek",
+    "leeks",
+    "cheat",
+    "cheats",
+    "cheating",
+    "cheated",
+    "ch3at",
+    "ch3ats",
+    "cheeting",
+    "cheater",
+    "c h e a t",
+    "ch3ating",
+    "form o",
+    "form 0",
+    "f0rm o",
+    "form-o",
+    "form-0",
+    "form d",
+    "form e",
+    "unreleased",
+    "un-released",
+    "unreleasd",
+    "test bank",
+    "testbank",
+    "exam bank",
+    "exambank",
+    "intl",
+    "international",
+    "intl form",
+    "international exam",
+    "form i",
+    "form-i",
+    "f0rm i",
+    "late exam",
+    "late testing",
+    "late form",
+    "makeup exam",
+    "make up exam",
+    "alternate form",
+    "answer key",
+    "ans key",
+    "answrs",
+    "ansr key",
+    "mcq",
+    "mcqs",
+    "m.c.q",
+    "multiple choice",
+    "frq",
+    "frqs",
+    "f.r.q",
+    "free response",
+    "mcq answers",
+    "frq answers",
+    "sell",
+    "selling",
+    "s3ll",
+    "s3lling",
+    "$ell",
+    "$elling",
+    "buy",
+    "buying",
+    "buyin",
+    "b u y",
+    "cashapp",
+    "cash app",
+    "venmo",
+    "paypal",
+    "crypto",
+    "btc",
+    "dm for",
+    "pm for",
+    "dm me",
+    "pm me",
+    "message me for",
+    "price",
+    "prices",
+)
+
+# Boundaries prevent matching inside unrelated words, while still allowing
+# terms that start with symbols, such as "$ell" and "|eak".
+TEXT_LEFT_BOUNDARY = r"(?<![A-Za-z0-9_])"
+TEXT_RIGHT_BOUNDARY = r"(?![A-Za-z0-9_])"
+
+
+def keyword_to_regex(keyword: str) -> str:
+    """
+    Escapes a monitored keyword and makes spaces flexible.
+
+    Example:
+    - "test bank" matches "test bank" with any whitespace between words.
+    - "form-o" stays hyphen-specific.
+    - "$ell" and "|eak" stay symbol-specific.
+    """
+    escaped = re.escape(keyword)
+    escaped = escaped.replace(r"\ ", r"\s+")
+    return rf"{TEXT_LEFT_BOUNDARY}{escaped}{TEXT_RIGHT_BOUNDARY}"
+
+
+KEYWORD_RE = re.compile(
+    "|".join(
+        keyword_to_regex(keyword)
+        for keyword in sorted(MONITORED_KEYWORDS, key=len, reverse=True)
+    ),
+    re.IGNORECASE,
+)
 
 
 class LeakLog(commands.Cog):
-    """Logs messages that contain the standalone keyword 'leak'."""
-
     def __init__(self, bot: APBot) -> None:
         self.bot = bot
 
@@ -30,33 +144,67 @@ class LeakLog(commands.Cog):
 
         return text[: limit - 20] + "\n... *(cut off)*"
 
-    def contains_leak_word(self, content: str) -> bool:
-        return LEAK_WORD_RE.search(content or "") is not None
+    def escape_for_embed(self, text: str) -> str:
+        safe_text = nextcord.utils.escape_mentions(text)
+        return nextcord.utils.escape_markdown(safe_text)
 
-    def safe_content(self, content: str) -> str:
-        """Escape mentions and markdown so the log cannot ping or format unexpectedly."""
-        content = content or ""
-        content = nextcord.utils.escape_mentions(content)
-        return nextcord.utils.escape_markdown(content)
+    def contains_monitored_keyword(self, content: str) -> bool:
+        return KEYWORD_RE.search(content or "") is not None
+
+    def detected_keywords(self, content: str) -> list[str]:
+        found: list[str] = []
+        seen: set[str] = set()
+
+        for match in KEYWORD_RE.finditer(content or ""):
+            keyword = " ".join(match.group(0).lower().split())
+
+            if keyword not in seen:
+                seen.add(keyword)
+                found.append(match.group(0))
+
+        return found
 
     def highlighted_content(self, content: str) -> str:
-        """Highlight standalone instances of 'leak' without using noisy emoji."""
+        """
+        Escapes Discord markdown/mentions, then highlights each matched term
+        with simple bold formatting.
+        """
         if not content:
             return "*No text content found.*"
 
-        safe = self.safe_content(content)
-        highlighted = LEAK_WORD_RE.sub(
-            lambda match: f"**{match.group(0)}**",
-            safe,
-        )
+        pieces: list[str] = []
+        cursor = 0
 
-        return self.clip(highlighted, 900)
+        for match in KEYWORD_RE.finditer(content):
+            pieces.append(self.escape_for_embed(content[cursor:match.start()]))
+            pieces.append(f"**{self.escape_for_embed(match.group(0))}**")
+            cursor = match.end()
 
-    def quote_message_preview(self, content: str) -> str:
+        pieces.append(self.escape_for_embed(content[cursor:]))
+
+        highlighted = "".join(pieces).strip()
+
+        if not highlighted:
+            return "*No text content found.*"
+
+        return self.clip(highlighted, 950)
+
+    def message_preview(self, content: str) -> str:
         highlighted = self.highlighted_content(content)
-        lines = highlighted.splitlines() or [highlighted]
-        quoted = "\n".join(f"> {line}" if line else ">" for line in lines)
+        quoted = "\n".join(f"> {line}" if line else ">" for line in highlighted.splitlines())
         return self.clip(quoted, 1000)
+
+    def format_keyword_list(self, keywords: list[str]) -> str:
+        if not keywords:
+            return "Unknown"
+
+        safe_keywords = [f"`{self.escape_for_embed(keyword)}`" for keyword in keywords[:10]]
+        text = ", ".join(safe_keywords)
+
+        if len(keywords) > 10:
+            text += f", +{len(keywords) - 10} more"
+
+        return self.clip(text, 1000)
 
     @commands.Cog.listener()
     async def on_message(self, message: nextcord.Message) -> None:
@@ -66,7 +214,7 @@ class LeakLog(commands.Cog):
         if message.author.bot:
             return
 
-        if not self.contains_leak_word(message.content or ""):
+        if not self.contains_monitored_keyword(message.content or ""):
             return
 
         log_channel = self.get_log_channel(message.guild)
@@ -74,14 +222,16 @@ class LeakLog(commands.Cog):
         if log_channel is None:
             return
 
-        # Prevent logging messages from the log channel itself.
+        # Prevent the logger from logging messages inside the log channel.
         if message.channel.id == log_channel.id:
             return
+
+        keywords = self.detected_keywords(message.content or "")
 
         embed = nextcord.Embed(
             title="Keyword Monitor Alert",
             description=(
-                "A monitored keyword was detected in a server message.\n"
+                f"A monitored keyword was detected in {message.channel.mention}. "
                 f"[Jump to message]({message.jump_url})"
             ),
             color=self.bot.colors.get("yellow", nextcord.Color.gold()),
@@ -94,20 +244,14 @@ class LeakLog(commands.Cog):
         )
 
         embed.add_field(
-            name="Keyword",
-            value="`leak`",
-            inline=True,
-        )
-
-        embed.add_field(
-            name="Channel",
-            value=message.channel.mention,
-            inline=True,
+            name="Detected Keyword(s)",
+            value=self.format_keyword_list(keywords),
+            inline=False,
         )
 
         embed.add_field(
             name="Message Preview",
-            value=self.quote_message_preview(message.content or ""),
+            value=self.message_preview(message.content or ""),
             inline=False,
         )
 
@@ -118,12 +262,18 @@ class LeakLog(commands.Cog):
         )
 
         embed.add_field(
+            name="Channel",
+            value=f"{message.channel.mention}\n`{message.channel.id}`",
+            inline=True,
+        )
+
+        embed.add_field(
             name="Message ID",
             value=f"`{message.id}`",
             inline=True,
         )
 
-        embed.set_footer(text="Leak keyword monitor")
+        embed.set_footer(text="Keyword monitoring")
 
         await log_channel.send(
             embed=embed,
@@ -131,5 +281,5 @@ class LeakLog(commands.Cog):
         )
 
 
-async def setup(bot: APBot) -> None:
+def setup(bot: APBot) -> None:
     bot.add_cog(LeakLog(bot))
