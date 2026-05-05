@@ -21,6 +21,7 @@ DEFAULT_COGS = [
     "cogs.voice_log",
     "cogs.exams_automation.day_zero_complete",
     "cogs.delete_log",
+    "cogs.leak_log",
 ]
 
 
