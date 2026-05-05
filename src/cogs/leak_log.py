@@ -66,14 +66,6 @@ MONITORED_KEYWORDS: tuple[str, ...] = (
     "ans key",
     "answrs",
     "ansr key",
-    "mcq",
-    "mcqs",
-    "m.c.q",
-    "multiple choice",
-    "frq",
-    "frqs",
-    "f.r.q",
-    "free response",
     "mcq answers",
     "frq answers",
     "sell",
@@ -101,8 +93,7 @@ MONITORED_KEYWORDS: tuple[str, ...] = (
     "prices",
 )
 
-# Boundaries prevent matching inside unrelated words, while still allowing
-# terms that start with symbols, such as "$ell" and "|eak".
+
 TEXT_LEFT_BOUNDARY = r"(?<![A-Za-z0-9_])"
 TEXT_RIGHT_BOUNDARY = r"(?![A-Za-z0-9_])"
 
@@ -156,10 +147,10 @@ class LeakLog(commands.Cog):
         seen: set[str] = set()
 
         for match in KEYWORD_RE.finditer(content or ""):
-            keyword = " ".join(match.group(0).lower().split())
+            normalized = " ".join(match.group(0).lower().split())
 
-            if keyword not in seen:
-                seen.add(keyword)
+            if normalized not in seen:
+                seen.add(normalized)
                 found.append(match.group(0))
 
         return found
@@ -272,8 +263,6 @@ class LeakLog(commands.Cog):
             value=f"`{message.id}`",
             inline=True,
         )
-
-        embed.set_footer(text="Keyword monitoring")
 
         await log_channel.send(
             embed=embed,
