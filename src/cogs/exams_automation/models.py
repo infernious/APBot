@@ -71,6 +71,9 @@ STUDY_SESSION_VC_IDS = [
     1498313547028107445,
     1498313642985390241,
     1498313820786135203,
+    1501347780587687986,
+    1501347839689883758,
+    1501347878684328148,
 ]
 
 DEFAULT_STUDY_SESSION_NAMES = [
@@ -78,6 +81,10 @@ DEFAULT_STUDY_SESSION_NAMES = [
     "Study Session 2",
     "Study Session 3",
     "Study Session 4",
+    "Study Session 5",
+    "Study Session 6",
+    "Study Session 7",
+
 ]
 
 CATEGORY_ALIASES: Dict[str, Tuple[str, ...]] = {
@@ -566,10 +573,29 @@ class APChannel:
         return roles
 
     def _subject_roles_to_toggle(self) -> List[nextcord.Role]:
-        return self._overwrite_roles_matching(
-            include_ap_like=True,
-            include_helper_lecture=True,
-        )
+        """
+        Subject channels are controlled only by role overwrites that already
+        exist on that channel and look like AP/helper roles.
+
+        This intentionally avoids falling back to @everyone and avoids touching
+        staff roles.
+        """
+        roles: List[nextcord.Role] = []
+
+        for target in self.channel.overwrites:
+            if not isinstance(target, nextcord.Role):
+                continue
+
+            if is_staff_role(target):
+                continue
+
+            lowered = target.name.lower()
+
+            if "ap" in lowered or "helper" in lowered:
+                if target not in roles:
+                    roles.append(target)
+
+        return roles
 
     def _lounge_roles_to_toggle(self) -> List[nextcord.Role]:
         return self._overwrite_roles_matching(
@@ -860,6 +886,185 @@ class APChannel:
             reason=reason,
         )
 
+    def _subject_everyone_base_needs_update(self) -> bool:
+        """
+        Subject-channel base state:
+        - @everyone cannot view the channel.
+        - send_messages and read_message_history stay allowed at @everyone so
+          the AP/helper role overwrites can keep those fields neutral.
+        """
+        overwrite = self.channel.overwrites_for(self.guild.default_role)
+
+        return not (
+            overwrite.view_channel is False
+            and overwrite.send_messages is True
+            and overwrite.read_message_history is True
+        )
+
+    async def _ensure_subject_everyone_base(
+        self,
+        report: ActionReport,
+        reason: str,
+    ) -> bool:
+        if not self.is_subject_channel():
+            return False
+
+        if not self._subject_everyone_base_needs_update():
+            return False
+
+        try:
+            await self.channel.set_permissions(
+                self.guild.default_role,
+                view_channel=False,
+                read_messages=False,
+                send_messages=True,
+                read_message_history=True,
+                reason=reason,
+            )
+            report.add_changed(
+                f"Set subject-channel `@everyone` base permissions for `{self.channel.name}`."
+            )
+            return True
+        except Exception as exc:
+            report.add_warning(
+                f"Failed setting subject-channel `@everyone` base for `{self.channel.name}`: {exc}"
+            )
+            return False
+
+    def _subject_role_needs_open(self, role: nextcord.Role) -> bool:
+        overwrite = self.channel.overwrites_for(role)
+
+        return (
+            overwrite.view_channel is not True
+            or overwrite.send_messages is not None
+            or overwrite.read_message_history is not None
+            or overwrite.connect is not None
+            or overwrite.speak is not None
+        )
+
+    def _subject_role_needs_close(self, role: nextcord.Role) -> bool:
+        overwrite = self.channel.overwrites_for(role)
+
+        return (
+            overwrite.view_channel is not False
+            or overwrite.send_messages is not None
+            or overwrite.read_message_history is not None
+            or overwrite.connect is not None
+            or overwrite.speak is not None
+        )
+
+    async def _set_subject_role_open(
+        self,
+        target: nextcord.Role,
+        *,
+        reason: str,
+    ) -> None:
+        """
+        Reopen a subject channel for an existing AP/helper overwrite role.
+
+        Only view_channel/read_messages are allowed on the role. Sending and
+        message history are reset to neutral so they inherit from @everyone.
+        """
+        await self.channel.set_permissions(
+            target,
+            view_channel=True,
+            read_messages=True,
+            send_messages=None,
+            read_message_history=None,
+            connect=None,
+            speak=None,
+            reason=reason,
+        )
+
+    async def _set_subject_role_close(
+        self,
+        target: nextcord.Role,
+        *,
+        reason: str,
+    ) -> None:
+        """
+        Close a subject channel by denying only channel visibility for the
+        existing AP/helper overwrite role. Sending/history remain neutral.
+        """
+        await self.channel.set_permissions(
+            target,
+            view_channel=False,
+            read_messages=False,
+            send_messages=None,
+            read_message_history=None,
+            connect=None,
+            speak=None,
+            reason=reason,
+        )
+
+    async def _open_subject_channel(self, report: ActionReport, reason: str) -> None:
+        roles = self._subject_roles_to_toggle()
+
+        if not roles:
+            report.add_untouched(
+                f"No AP/helper overwrite roles found to open for subject channel `{self.channel.name}`."
+            )
+            await self._ensure_subject_everyone_base(report, reason)
+            return
+
+        await self._ensure_subject_everyone_base(report, reason)
+
+        roles_needing_open = [
+            role for role in roles
+            if self._subject_role_needs_open(role)
+        ]
+
+        if not roles_needing_open:
+            report.add_untouched(f"Subject channel `{self.channel.name}` was already open.")
+            return
+
+        for role in roles_needing_open:
+            try:
+                await self._set_subject_role_open(role, reason=reason)
+                report.add_changed(
+                    f"Opened subject channel `{self.channel.name}` for `{role.name}`."
+                )
+            except Exception as exc:
+                report.add_warning(
+                    f"Failed opening subject channel `{self.channel.name}` for `{role.name}`: {exc}"
+                )
+
+        await self._send_status_embed(report, opened=True)
+
+    async def _close_subject_channel(self, report: ActionReport, reason: str) -> None:
+        roles = self._subject_roles_to_toggle()
+
+        if not roles:
+            report.add_untouched(
+                f"No AP/helper overwrite roles found to close for subject channel `{self.channel.name}`."
+            )
+            await self._ensure_subject_everyone_base(report, reason)
+            return
+
+        await self._ensure_subject_everyone_base(report, reason)
+
+        roles_needing_close = [
+            role for role in roles
+            if self._subject_role_needs_close(role)
+        ]
+
+        if not roles_needing_close:
+            report.add_untouched(f"Subject channel `{self.channel.name}` was already closed.")
+            return
+
+        await self._send_status_embed(report, opened=False)
+
+        for role in roles_needing_close:
+            try:
+                await self._set_subject_role_close(role, reason=reason)
+                report.add_changed(
+                    f"Closed subject channel `{self.channel.name}` for `{role.name}`."
+                )
+            except Exception as exc:
+                report.add_warning(
+                    f"Failed closing subject channel `{self.channel.name}` for `{role.name}`: {exc}"
+                )
+
     async def _deny_everyone_for_role_gated_channel(
         self,
         report: ActionReport,
@@ -900,6 +1105,10 @@ class APChannel:
             return False
 
     async def close(self, report: ActionReport, reason: str) -> None:
+        if self.is_subject_channel():
+            await self._close_subject_channel(report, reason)
+            return
+
         roles = self.roles_to_toggle()
 
         if not roles:
@@ -949,6 +1158,10 @@ class APChannel:
                 )
 
     async def open(self, report: ActionReport, reason: str) -> None:
+        if self.is_subject_channel():
+            await self._open_subject_channel(report, reason)
+            return
+
         roles = self.roles_to_toggle()
 
         if not roles:
@@ -1136,23 +1349,34 @@ class ExamAutomationManager:
                 continue
 
             try:
-                if opened and idx < len(study_subjects):
-                    subject = study_subjects[idx]
-                    label = SUBJECT_LABELS.get(subject, subject)
-                    await channel.edit(name=label, reason=reason)
+                fallback_name = DEFAULT_STUDY_SESSION_NAMES[idx]
+
+                if opened:
+                    if idx < len(study_subjects):
+                        subject = study_subjects[idx]
+                        target_name = SUBJECT_LABELS.get(subject, subject)
+                        report_label = target_name
+                    else:
+                        target_name = fallback_name
+                        report_label = "general study"
+
+                    await channel.edit(name=target_name, reason=reason)
                     await channel.set_permissions(
                         guild.default_role,
+                        view_channel=True,
                         read_messages=True,
                         connect=True,
                         speak=True,
                         reason=reason,
                     )
-                    report.add_changed(f"Opened study VC `{channel.name}` for `{label}`.")
+                    report.add_changed(
+                        f"Opened study VC `{channel.name}` for `{report_label}`."
+                    )
                 else:
-                    fallback_name = DEFAULT_STUDY_SESSION_NAMES[idx]
                     await channel.edit(name=fallback_name, reason=reason)
                     await channel.set_permissions(
                         guild.default_role,
+                        view_channel=False,
                         read_messages=False,
                         connect=False,
                         speak=False,
