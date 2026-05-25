@@ -3,8 +3,16 @@ import copy
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from database_handler import BaseDatabase
+from database_handler import BaseDatabase, WordleDatabase
 from models import Infraction
+
+
+class FakeCursor:
+    def __init__(self, docs):
+        self.docs = [copy.deepcopy(doc) for doc in docs]
+
+    async def to_list(self, length=None):
+        return copy.deepcopy(self.docs)
 
 
 class FakeCollection:
@@ -42,12 +50,51 @@ class FakeCollection:
 
         return SimpleNamespace(modified_count=0)
 
+    async def update_one(self, query, update, upsert=False):
+        for index, doc in enumerate(self.docs):
+            if self._matches(doc, query):
+                stored = copy.deepcopy(doc)
+                stored.update(copy.deepcopy(update.get("$set", {})))
+                self.docs[index] = stored
+                return SimpleNamespace(modified_count=1, upserted_id=None)
+
+        if upsert:
+            stored = copy.deepcopy(query)
+            stored.update(copy.deepcopy(update.get("$set", {})))
+            stored.setdefault("_id", len(self.docs) + 1)
+            self.docs.append(stored)
+            return SimpleNamespace(modified_count=0, upserted_id=stored["_id"])
+
+        return SimpleNamespace(modified_count=0, upserted_id=None)
+
+    async def update_many(self, query, update):
+        modified_count = 0
+
+        for index, doc in enumerate(self.docs):
+            if self._matches(doc, query):
+                stored = copy.deepcopy(doc)
+                stored.update(copy.deepcopy(update.get("$set", {})))
+                self.docs[index] = stored
+                modified_count += 1
+
+        return SimpleNamespace(modified_count=modified_count)
+
+    def find(self, query):
+        return FakeCursor([doc for doc in self.docs if self._matches(doc, query)])
+
 
 def make_base_db(user_docs=None):
     db = object.__new__(BaseDatabase)
     db.user_config = FakeCollection(user_docs)
     db.bot_config = FakeCollection()
     db.database = {"channel_config": FakeCollection()}
+    return db
+
+
+def make_wordle_db(season_docs=None, result_docs=None):
+    db = object.__new__(WordleDatabase)
+    db.wordle_seasons = FakeCollection(season_docs)
+    db.wordle_results = FakeCollection(result_docs)
     return db
 
 
@@ -164,3 +211,44 @@ def test_get_user_infractions_normalizes_old_mute_records():
     assert infractions[0].duration == 1800
     assert infractions[0].attachment_url == "https://example.com/old.png"
     assert infractions[0].actiontime == datetime(2024, 2, 3, 10, 15, 0, tzinfo=timezone.utc)
+
+
+def test_wordle_start_season_deactivates_existing_active_season():
+    db = make_wordle_db([
+        {"guild_id": 1, "channel_id": 10, "start_date": "2026-05-01", "end_date": "2026-05-31", "active": True},
+    ])
+
+    asyncio.run(db.start_season(1, 20, "2026-06-01", "2026-06-30"))
+
+    assert db.wordle_seasons.docs[0]["active"] is False
+    assert db.wordle_seasons.docs[1]["active"] is True
+    assert db.wordle_seasons.docs[1]["channel_id"] == 20
+
+
+def test_wordle_leaderboard_sums_scores_and_sorts_lowest_first():
+    db = make_wordle_db()
+
+    asyncio.run(db.save_result(1, 10, 111, "Push", 1801, 4, False, False, 4, "2026-05-01", 100, "2026-05-01", "2026-05-31", "user_share"))
+    asyncio.run(db.save_result(1, 10, 111, "Push", 1802, 3, False, True, 2, "2026-05-02", 101, "2026-05-01", "2026-05-31", "user_share"))
+    asyncio.run(db.save_result(1, 10, 222, "Other", 1801, None, True, False, 7, "2026-05-01", 102, "2026-05-01", "2026-05-31", "user_share"))
+
+    rows = asyncio.run(db.get_leaderboard(1, "2026-05-01", "2026-05-31"))
+
+    assert rows[0]["user_id"] == 111
+    assert rows[0]["total_score"] == 6
+    assert rows[0]["games"] == 2
+    assert rows[0]["hard_games"] == 1
+    assert rows[1]["user_id"] == 222
+    assert rows[1]["failures"] == 1
+
+
+def test_wordle_summary_does_not_downgrade_hard_user_share():
+    db = make_wordle_db()
+
+    asyncio.run(db.save_result(1, 10, 111, "Push", 1801, 3, False, True, 2, "2026-05-01", 100, "2026-05-01", "2026-05-31", "user_share"))
+    asyncio.run(db.save_result(1, 10, 111, "Push", None, 3, False, False, 3, "2026-05-01", 101, "2026-05-01", "2026-05-31", "wordle_bot_summary"))
+
+    rows = asyncio.run(db.get_leaderboard(1, "2026-05-01", "2026-05-31"))
+
+    assert rows[0]["total_score"] == 2
+    assert rows[0]["hard_games"] == 1

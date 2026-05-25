@@ -13,7 +13,7 @@ conf = load_optional_config()
 COMMAND_GUILD_IDS = get_command_guild_ids(conf)
 
 WORDLE_RESULT_RE = re.compile(r"\bWordle\s+(\d[\d,]*)\s+([1-6X])/6(\*)?", re.IGNORECASE)
-WORDLE_SUMMARY_RE = re.compile(r"([1-6X])/6(\*)?\s*[:\-]\s*((?:<@!?\d+>\s*)+)", re.IGNORECASE)
+WORDLE_SUMMARY_RE = re.compile(r"\b([1-6X])/6(\*)?(?=\s|[:\-–—]|$)\s*(?::|[-–—])?\s*((?:<@!?\d+>[\s,;]*)+)", re.IGNORECASE)
 MENTION_RE = re.compile(r"<@!?(\d+)>")
 
 
@@ -31,7 +31,7 @@ def can_manage_wordle(member) -> bool:
         return True
 
     perms = getattr(member, "guild_permissions", None)
-    if perms and (perms.manage_guild or perms.administrator):
+    if perms and (getattr(perms, "manage_guild", False) or getattr(perms, "administrator", False)):
         return True
 
     allowed_role_names = {"Trial Chat Moderator", "Chat Moderator", "Admin"}
@@ -44,7 +44,11 @@ def can_manage_wordle(member) -> bool:
         if role_id is not None
     }
 
-    return any(role.name in allowed_role_names or role.id in allowed_role_ids for role in getattr(member, "roles", []))
+    return any(
+        getattr(role, "name", None) in allowed_role_names
+        or getattr(role, "id", None) in allowed_role_ids
+        for role in getattr(member, "roles", [])
+    )
 
 
 def is_wordle_channel(channel) -> bool:
@@ -56,6 +60,24 @@ def get_history_bounds(start, end):
     end_plus_two = end + timedelta(days=2)
     before = datetime(end_plus_two.year, end_plus_two.month, end_plus_two.day, tzinfo=timezone.utc)
     return after, before
+
+
+def get_message_date(message: nextcord.Message):
+    created_at = message.created_at
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    return created_at.astimezone(timezone.utc).date()
+
+
+def get_summary_played_date(content: str, message: nextcord.Message):
+    created_date = get_message_date(message)
+    if "yesterday" in content.lower():
+        return created_date - timedelta(days=1)
+    return created_date
+
+
+def date_in_season(played_date: str, season: dict) -> bool:
+    return season["start_date"] <= played_date <= season["end_date"]
 
 
 def wordle_score(tries, failed: bool, hard_mode: bool) -> int:
@@ -153,6 +175,18 @@ def format_wordle_leaderboard(rows):
 class Wordle(commands.Cog):
     def __init__(self, bot: APBot) -> None:
         self.bot = bot
+
+    async def resolve_username(self, guild: nextcord.Guild, user_id: int) -> str:
+        member = guild.get_member(user_id)
+        if member:
+            return member.display_name
+
+        try:
+            member = await guild.fetch_member(user_id)
+        except (nextcord.NotFound, nextcord.Forbidden, nextcord.HTTPException):
+            return str(user_id)
+
+        return member.display_name
 
     @slash_command(name="wordle", description="Manage the Wordle leaderboard", guild_ids=COMMAND_GUILD_IDS)
     async def wordle(self, inter: Interaction):
@@ -266,8 +300,8 @@ class Wordle(commands.Cog):
         if not season:
             return False
 
-        played_date = message.created_at.astimezone(timezone.utc).date().isoformat()
-        if played_date < season["start_date"] or played_date > season["end_date"]:
+        played_date = get_message_date(message).isoformat()
+        if not date_in_season(played_date, season):
             return False
 
         await self.bot.db.wordle.save_result(
@@ -305,17 +339,14 @@ class Wordle(commands.Cog):
         if not season:
             return 0
 
-        created_date = message.created_at.astimezone(timezone.utc).date()
-        played_date = created_date - timedelta(days=1) if "yesterday" in text.lower() else created_date
-        played_date_text = played_date.isoformat()
+        played_date_text = get_summary_played_date(text, message).isoformat()
 
-        if played_date_text < season["start_date"] or played_date_text > season["end_date"]:
+        if not date_in_season(played_date_text, season):
             return 0
 
         count = 0
         for entry in entries:
-            member = message.guild.get_member(entry["user_id"])
-            username = member.display_name if member else str(entry["user_id"])
+            username = await self.resolve_username(message.guild, entry["user_id"])
 
             await self.bot.db.wordle.save_result(
                 guild_id=message.guild.id,
@@ -345,10 +376,20 @@ class Wordle(commands.Cog):
         if season.get("last_summary_message_id") == message.id:
             return
 
-        await self.process_wordle_summary_message(message)
+        text = get_message_text(message)
+        played_date = get_summary_played_date(text, message).isoformat()
+        if not date_in_season(played_date, season):
+            return
 
+        processed = await self.process_wordle_summary_message(message)
         async for recent_message in message.channel.history(limit=100):
-            await self.process_wordle_result_message(recent_message)
+            if get_message_date(recent_message).isoformat() != played_date:
+                continue
+            if await self.process_wordle_result_message(recent_message):
+                processed += 1
+
+        if processed == 0:
+            return
 
         rows = await self.bot.db.wordle.get_leaderboard(
             message.guild.id,

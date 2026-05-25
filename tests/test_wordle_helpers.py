@@ -1,4 +1,9 @@
+import asyncio
+from types import SimpleNamespace
+
 from cogs.wordle import (
+    Wordle,
+    date_in_season,
     format_wordle_leaderboard,
     is_wordle_summary_message,
     parse_date,
@@ -43,7 +48,7 @@ def test_parse_wordle_result_invalid():
 
 
 def test_parse_wordle_summary_text():
-    text = "Here are yesterday's results:\\n3/6*: <@111>\\n4/6: <@222> <@!333>\\nX/6: <@444>"
+    text = "Here are yesterday's results:\n3/6*: <@111>\n4/6 — <@222>, <@!333>\nX/6 <@444>"
 
     results = parse_wordle_summary_text(text)
 
@@ -64,7 +69,7 @@ def test_parse_wordle_summary_text():
 def test_is_wordle_summary_message():
     assert is_wordle_summary_message("Your group is on a 7 day streak. Here are yesterday's results") is True
     assert is_wordle_summary_message("3/6: <@111>") is True
-    assert is_wordle_summary_message("push was playing\\n1 finished game of Wordle") is True
+    assert is_wordle_summary_message("push was playing\n1 finished game of Wordle") is True
     assert is_wordle_summary_message("hello") is False
 
 
@@ -72,6 +77,14 @@ def test_wordle_score():
     assert wordle_score(3, False, False) == 3
     assert wordle_score(3, False, True) == 2
     assert wordle_score(None, True, False) == 7
+
+
+def test_date_in_season():
+    season = {"start_date": "2026-05-01", "end_date": "2026-05-31"}
+
+    assert date_in_season("2026-05-01", season) is True
+    assert date_in_season("2026-05-31", season) is True
+    assert date_in_season("2026-06-01", season) is False
 
 
 def test_parse_date():
@@ -91,3 +104,16 @@ def test_format_wordle_leaderboard():
     assert "6 pts" in text
     assert "<@2>" in text
     assert "failed" in text
+
+
+def test_resolve_username_fetches_member_when_not_cached():
+    class FakeGuild:
+        def get_member(self, user_id):
+            return None
+
+        async def fetch_member(self, user_id):
+            return SimpleNamespace(display_name="Fetched Name")
+
+    cog = Wordle(bot=object())
+
+    assert asyncio.run(cog.resolve_username(FakeGuild(), 123)) == "Fetched Name"
