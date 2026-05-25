@@ -736,6 +736,103 @@ class TagsDatabase(BaseDatabase):
     async def remove_user_tags(self, user_id: int) -> None:
         await self.tags.delete_many({"user_id": user_id})
     
+
+class WordleDatabase(BaseDatabase):
+    def __init__(self, conf=None):
+        super().__init__(conf)
+        self.wordle_seasons = self.database["wordle_seasons"]
+        self.wordle_results = self.database["wordle_results"]
+
+    async def start_season(self, guild_id: int, channel_id: int, start_date: str, end_date: str) -> None:
+        await self.wordle_seasons.update_many(
+            {"guild_id": guild_id, "active": True},
+            {"$set": {"active": False}},
+        )
+        await self.wordle_seasons.insert_one({
+            "guild_id": guild_id,
+            "channel_id": channel_id,
+            "start_date": start_date,
+            "end_date": end_date,
+            "active": True,
+        })
+
+    async def get_active_season(self, guild_id: int):
+        return await self.wordle_seasons.find_one({"guild_id": guild_id, "active": True})
+
+    async def set_last_summary_message(self, guild_id: int, message_id: int) -> None:
+        await self.wordle_seasons.update_one(
+            {"guild_id": guild_id, "active": True},
+            {"$set": {"last_summary_message_id": message_id}},
+        )
+
+    async def save_result(
+        self,
+        guild_id: int,
+        channel_id: int,
+        user_id: int,
+        username: str,
+        puzzle: int,
+        tries,
+        failed: bool,
+        hard_mode: bool,
+        score: int,
+        played_date: str,
+        message_id: int,
+        season_start: str,
+        season_end: str,
+    ) -> None:
+        await self.wordle_results.update_one(
+            {
+                "guild_id": guild_id,
+                "user_id": user_id,
+                "puzzle": puzzle,
+                "season_start": season_start,
+                "season_end": season_end,
+            },
+            {
+                "$set": {
+                    "channel_id": channel_id,
+                    "username": username,
+                    "tries": tries,
+                    "failed": failed,
+                    "hard_mode": hard_mode,
+                    "score": score,
+                    "played_date": played_date,
+                    "message_id": message_id,
+                    "season_start": season_start,
+                    "season_end": season_end,
+                }
+            },
+            upsert=True,
+        )
+
+    async def get_leaderboard(self, guild_id: int, start_date: str, end_date: str) -> list:
+        docs = await self.wordle_results.find({
+            "guild_id": guild_id,
+            "season_start": start_date,
+            "season_end": end_date,
+        }).to_list(length=None)
+
+        users = {}
+        for doc in docs:
+            user_id = doc["user_id"]
+            users.setdefault(user_id, {
+                "user_id": user_id,
+                "username": doc.get("username", str(user_id)),
+                "total_score": 0,
+                "games": 0,
+                "hard_games": 0,
+                "failures": 0,
+            })
+            users[user_id]["total_score"] += int(doc.get("score", 0))
+            users[user_id]["games"] += 1
+            users[user_id]["hard_games"] += 1 if doc.get("hard_mode") else 0
+            users[user_id]["failures"] += 1 if doc.get("failed") else 0
+
+        return sorted(users.values(), key=lambda row: (row["total_score"], -row["games"], row["username"].lower()))
+
+
+
 class RecurrentDatabase(BaseDatabase):
 
     def __init__(self, conf=None):
@@ -814,5 +911,6 @@ class Database:
         self.appeal: AppealDatabase = AppealDatabase()
         self.recurrent: RecurrentDatabase = RecurrentDatabase()
         self.tags: TagsDatabase = TagsDatabase() 
+        self.wordle: WordleDatabase = WordleDatabase()
         self.config_lock = asyncio.Lock()
         self.config_data = {} 
