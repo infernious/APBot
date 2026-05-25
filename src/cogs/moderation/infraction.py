@@ -1,6 +1,6 @@
 import nextcord
 import re
-from nextcord import slash_command, Permissions, Interaction, User, Embed, Member, TextChannel, Object, Color
+from nextcord import slash_command, Permissions, Interaction, User, Embed, Member, TextChannel, Object, Color, SlashOption, SlashOption, SlashOption
 from nextcord.ext import commands
 from typing import Optional
 from bot_base import APBot
@@ -23,6 +23,47 @@ def to_snowflake(value):
             return int(m.group(0))
     return None
 
+
+def format_update_date(value):
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, str):
+        try:
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return "unknown time"
+    else:
+        return "unknown time"
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+
+    return f"<t:{int(dt.timestamp())}:R>"
+
+
+def format_infraction_updates(updates):
+    if not updates:
+        return ""
+
+    lines = []
+    for update in updates[-5:]:
+        if isinstance(update, str):
+            lines.append(f"- {update}")
+            continue
+
+        if not isinstance(update, dict):
+            lines.append(f"- {update}")
+            continue
+
+        moderator = update.get("moderator", "Unknown moderator")
+        moderator_id = to_snowflake(moderator)
+        moderator_text = f"<@{moderator_id}>" if moderator_id else str(moderator)
+        note = update.get("update") or update.get("note") or "No note provided"
+        date_text = format_update_date(update.get("date"))
+        lines.append(f"- {note} — {moderator_text}, {date_text}")
+
+    return "Notes:\n" + "\n".join(lines) + "\n"
+
 class Infraction(commands.Cog):
     def __init__(self, bot: APBot) -> None:
         self.bot = bot
@@ -30,8 +71,12 @@ class Infraction(commands.Cog):
     def has_mod_role(self, member: Member) -> bool:
         allowed_role_names = {"Trial Chat Moderator", "Chat Moderator", "Admin"}
         allowed_role_ids = {
-            conf.get("bot_staff_role_id"),
-            conf.get("special_perms_role_id"),
+            role_id
+            for role_id in (
+                conf.get("bot_staff_role_id"),
+                conf.get("special_perms_role_id"),
+            )
+            if role_id is not None
         }
 
         perms = getattr(member, "guild_permissions", None)
@@ -175,12 +220,15 @@ class Infraction(commands.Cog):
                 except (ValueError, TypeError, AttributeError):
                     pass
 
+            update_line = format_infraction_updates(getattr(inf, "update", []))
             embed = Embed(
-                title=action,
+                title=f"#{index} - {action}",
                 description=(
+                    f"Index: {index}\n"
                     f"Reason: {reason}\n"
                     f"{duration_line}"
                     f"Responsible Mod: {mod_line}\n"
+                    f"{update_line}"
                     f"{index}/{total} infractions • {timestamp}"
                 ),
                 color=color_map.get(getattr(inf, "actiontype", ""), Color.gold()),
@@ -236,27 +284,47 @@ class Infraction(commands.Cog):
                 )
             )
 
-# Work on later
-#    @slash_command(name="update", description="Update a member's infraction history.", default_member_permissions=Permissions(moderate_members=True))
-#    async def update(self, interaction: Interaction, user:  User, infraction: int, update: str):
-#        member_config = await self.bot.db.base_db.read_user_config(user.id)
-#        infractions = member_config["infractions"]
-#        infraction_update = infractions[infraction]
+    @slash_command(
+        name="update",
+        description="Update a member's infraction history.",
+        default_member_permissions=Permissions(moderate_members=True),
+        guild_ids=COMMAND_GUILD_IDS,
+    )
+    async def update(
+        self,
+        interaction: Interaction,
+        member: Member,
+        index: int,
+        action: str = SlashOption(choices=["reason", "delete", "note"], description="Choose what to update."),
+        text: Optional[str] = SlashOption(description="New reason or note text. Leave empty only for delete.", required=False),
+    ):
+        if not self.has_mod_role(interaction.user):
+            await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+            return
 
-#        if infraction_update.get('update') is None:
-#            infraction_update['update'] = []
+        if index < 1:
+            await interaction.response.send_message("Use the index shown in /warnings, starting at 1.", ephemeral=True)
+            return
 
-#        update_dict = {
-#            "moderator": interaction.user.mention,
-#            "update": update,
-#            "date": datetime.utcnow()
-#        }
+        if action in {"reason", "note"} and not text:
+            await interaction.response.send_message("Text is required for this update type.", ephemeral=True)
+            return
 
-#        infraction_update['update'].append(update_dict)
+        if action == "reason":
+            updated = await self.bot.db.base_db.update_infraction_reason(member.id, index, text)
+            response = f"Updated reason for infraction #{index} on {member.mention}."
+        elif action == "delete":
+            updated = await self.bot.db.base_db.delete_infraction(member.id, index)
+            response = f"Deleted infraction #{index} from {member.mention}'s history. Infraction points were not changed."
+        else:
+            updated = await self.bot.db.base_db.add_infraction_note(member.id, index, interaction.user.id, text)
+            response = f"Added a note to infraction #{index} on {member.mention}."
 
-#        await self.bot.db.base_db.update_user_config(user.id, member_config)  # Save changes
+        if not updated:
+            await interaction.response.send_message("That infraction index does not exist.", ephemeral=True)
+            return
 
-#        await interaction.response.send_message("Infraction updated successfully.", ephemeral=True)
+        await interaction.response.send_message(response, ephemeral=True)
 
     @slash_command(name="userip", description="View a member's infraction points.", default_member_permissions=Permissions(moderate_members=True), guild_ids=COMMAND_GUILD_IDS)
     async def userip(self, interaction: Interaction, member: Member):

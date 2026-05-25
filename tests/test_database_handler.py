@@ -164,3 +164,72 @@ def test_get_user_infractions_normalizes_old_mute_records():
     assert infractions[0].duration == 1800
     assert infractions[0].attachment_url == "https://example.com/old.png"
     assert infractions[0].actiontime == datetime(2024, 2, 3, 10, 15, 0, tzinfo=timezone.utc)
+
+def test_update_infraction_reason_updates_new_and_legacy_reason_fields():
+    db = make_base_db([
+        {
+            "_id": 1,
+            "user_id": 5,
+            "infraction_points": 0,
+            "infractions": [{"type": "mute", "mute_reason": "old"}],
+        }
+    ])
+
+    result = asyncio.run(db.update_infraction_reason(5, 1, "new reason"))
+    stored = asyncio.run(db.read_user_config(5))
+
+    assert result is True
+    assert stored["infractions"][0]["reason"] == "new reason"
+    assert stored["infractions"][0]["mute_reason"] == "new reason"
+
+
+def test_add_infraction_note_appends_update_entry():
+    db = make_base_db([
+        {
+            "_id": 1,
+            "user_id": 5,
+            "infraction_points": 0,
+            "infractions": [{"actiontype": "warn", "reason": "old"}],
+        }
+    ])
+    date = datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+
+    result = asyncio.run(db.add_infraction_note(5, 1, 999, "extra context", date))
+    stored = asyncio.run(db.read_user_config(5))
+
+    assert result is True
+    assert stored["infractions"][0]["update"][0]["moderator"] == 999
+    assert stored["infractions"][0]["update"][0]["update"] == "extra context"
+    assert stored["infractions"][0]["update"][0]["date"] == "2024-01-02T03:04:05+00:00"
+
+
+def test_delete_infraction_removes_only_selected_index():
+    db = make_base_db([
+        {
+            "_id": 1,
+            "user_id": 5,
+            "infraction_points": 10,
+            "infractions": [
+                {"actiontype": "warn", "reason": "first"},
+                {"actiontype": "mute", "reason": "second"},
+            ],
+        }
+    ])
+
+    result = asyncio.run(db.delete_infraction(5, 1))
+    stored = asyncio.run(db.read_user_config(5))
+
+    assert result is True
+    assert len(stored["infractions"]) == 1
+    assert stored["infractions"][0]["reason"] == "second"
+    assert stored["infraction_points"] == 10
+
+
+def test_infraction_update_helpers_reject_bad_index():
+    db = make_base_db([
+        {"_id": 1, "user_id": 5, "infraction_points": 0, "infractions": []}
+    ])
+
+    assert asyncio.run(db.update_infraction_reason(5, 1, "reason")) is False
+    assert asyncio.run(db.add_infraction_note(5, 1, 999, "note")) is False
+    assert asyncio.run(db.delete_infraction(5, 1)) is False

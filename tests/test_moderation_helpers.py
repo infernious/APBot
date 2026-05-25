@@ -26,3 +26,20 @@ def test_to_snowflake_parses_mentions_and_ints():
     assert to_snowflake("<@123456789012345678>") == 123456789012345678
     assert to_snowflake("not-a-user") is None
     assert to_snowflake(None) is None
+
+from datetime import datetime, timezone
+from cogs.moderation.infraction import format_infraction_updates
+
+
+def test_format_infraction_updates_shows_note_moderator_and_date():
+    text = format_infraction_updates([
+        {
+            "moderator": 123456789012345678,
+            "update": "extra context",
+            "date": datetime(2024, 1, 1, tzinfo=timezone.utc),
+        }
+    ])
+
+    assert "Notes:" in text
+    assert "extra context" in text
+    assert "<@123456789012345678>" in text

@@ -134,6 +134,59 @@ class BaseDatabase(metaclass=SingletonMeta):
 
 
 
+
+    async def update_infraction_reason(self, user_id: int, index: int, reason: str) -> bool:
+        user_config = await self.read_user_config(user_id)
+        infractions = user_config.get("infractions", [])
+
+        if index < 1 or index > len(infractions):
+            return False
+
+        infraction = infractions[index - 1]
+        infraction["reason"] = reason
+        infraction["mute_reason"] = reason
+        await self.update_user_config(user_id, user_config)
+        return True
+
+    async def delete_infraction(self, user_id: int, index: int) -> bool:
+        user_config = await self.read_user_config(user_id)
+        infractions = user_config.get("infractions", [])
+
+        if index < 1 or index > len(infractions):
+            return False
+
+        del infractions[index - 1]
+        user_config["infractions"] = infractions
+        await self.update_user_config(user_id, user_config)
+        return True
+
+    async def add_infraction_note(self, user_id: int, index: int, moderator_id: int, note: str, actiontime=None) -> bool:
+        user_config = await self.read_user_config(user_id)
+        infractions = user_config.get("infractions", [])
+
+        if index < 1 or index > len(infractions):
+            return False
+
+        if actiontime is None:
+            actiontime = datetime.now(timezone.utc)
+
+        if isinstance(actiontime, datetime):
+            if actiontime.tzinfo is None:
+                actiontime = actiontime.replace(tzinfo=timezone.utc)
+            actiontime = actiontime.astimezone(timezone.utc).isoformat()
+
+        infraction = infractions[index - 1]
+        updates = infraction.get("update") or []
+        updates.append({
+            "moderator": moderator_id,
+            "update": note,
+            "date": actiontime,
+        })
+        infraction["update"] = updates
+
+        await self.update_user_config(user_id, user_config)
+        return True
+
     async def get_user_infractions(self, user_id: int) -> list:
         user_config = await self.read_user_config(user_id)
         infractions = user_config.get("infractions", [])
