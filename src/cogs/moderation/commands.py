@@ -25,6 +25,24 @@ MIN_SELFMUTE_SECONDS = 600
 MAX_SELFMUTE_SECONDS = 604800
 
 
+def format_duration_seconds(duration_seconds: int) -> str:
+    days, rem = divmod(duration_seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, seconds = divmod(rem, 60)
+
+    parts = []
+    if days:
+        parts.append(f"{days}d")
+    if hours:
+        parts.append(f"{hours}h")
+    if minutes:
+        parts.append(f"{minutes}m")
+    if seconds:
+        parts.append(f"{seconds}s")
+
+    return " ".join(parts) if parts else "0s"
+
+
 def validate_selfmute_duration(duration: str):
     duration_seconds = convert_time(duration)
     if isinstance(duration_seconds, str):
@@ -34,6 +52,17 @@ def validate_selfmute_duration(duration: str):
     if duration_seconds > MAX_SELFMUTE_SECONDS:
         return None, "Selfmute cannot be longer than 168 hours."
     return duration_seconds, None
+
+
+def current_timeout_ends_after(member, unmute_time: datetime) -> bool:
+    timeout_until = getattr(member, "communication_disabled_until", None)
+    if timeout_until is None:
+        return False
+
+    if timeout_until.tzinfo is None:
+        timeout_until = timeout_until.replace(tzinfo=timezone.utc)
+
+    return timeout_until.astimezone(timezone.utc) > unmute_time
 
 class Infraction:
     def __init__(
@@ -424,6 +453,13 @@ class ModerationCommands(commands.Cog):
         unmute_time = now + time_until
         reason = f"Selfmute requested by {member} ({member.id})"
 
+        if current_timeout_ends_after(member, unmute_time):
+            await interaction.response.send_message(
+                "You are already muted longer than that, so I will not shorten your current timeout.",
+                ephemeral=True,
+            )
+            return
+
         try:
             await member.timeout(timeout=time_until, reason=reason)
         except Forbidden:
@@ -450,7 +486,7 @@ class ModerationCommands(commands.Cog):
                 title="Selfmute Logged",
                 description=(
                     f"User: {member.mention} (`{member.id}`)\n"
-                    f"Duration: {duration}\n"
+                    f"Duration: {format_duration_seconds(duration_seconds)}\n"
                     f"Will be unmuted at: <t:{int(unmute_time.timestamp())}:f> "
                     f"(<t:{int(unmute_time.timestamp())}:R>)"
                 ),
@@ -459,7 +495,7 @@ class ModerationCommands(commands.Cog):
             )
             try:
                 await logs_channel.send(embed=log_embed)
-            except Forbidden:
+            except (Forbidden, nextcord.HTTPException):
                 pass
 
     @slash_command(
@@ -1095,5 +1131,4 @@ class ModerationCommands(commands.Cog):
 
 async def setup(bot: APBot) -> None:
     bot.add_cog(ModerationCommands(bot))
-
 
