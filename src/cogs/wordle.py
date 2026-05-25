@@ -24,6 +24,40 @@ def parse_date(value: str):
         return None
 
 
+
+def can_manage_wordle(member) -> bool:
+    owner_ids = conf.get("owner_ids") or []
+    if getattr(member, "id", None) in owner_ids:
+        return True
+
+    perms = getattr(member, "guild_permissions", None)
+    if perms and (perms.manage_guild or perms.administrator):
+        return True
+
+    allowed_role_names = {"Trial Chat Moderator", "Chat Moderator", "Admin"}
+    allowed_role_ids = {
+        role_id
+        for role_id in (
+            conf.get("bot_staff_role_id"),
+            conf.get("special_perms_role_id"),
+        )
+        if role_id is not None
+    }
+
+    return any(role.name in allowed_role_names or role.id in allowed_role_ids for role in getattr(member, "roles", []))
+
+
+def is_wordle_channel(channel) -> bool:
+    return (getattr(channel, "name", "") or "").lower() == "wordle"
+
+
+def get_history_bounds(start, end):
+    after = datetime(start.year, start.month, start.day, tzinfo=timezone.utc) - timedelta(seconds=1)
+    end_plus_two = end + timedelta(days=2)
+    before = datetime(end_plus_two.year, end_plus_two.month, end_plus_two.day, tzinfo=timezone.utc)
+    return after, before
+
+
 def wordle_score(tries, failed: bool, hard_mode: bool) -> int:
     if failed:
         return 7
@@ -133,6 +167,14 @@ class Wordle(commands.Cog):
     ) -> None:
         await inter.response.defer(ephemeral=True)
 
+        if not can_manage_wordle(inter.user):
+            await inter.followup.send("Only staff can start Wordle seasons.", ephemeral=True)
+            return
+
+        if not is_wordle_channel(inter.channel):
+            await inter.followup.send("Run this in #wordle.", ephemeral=True)
+            return
+
         start = parse_date(start_date)
         end = parse_date(end_date)
 
@@ -146,16 +188,46 @@ class Wordle(commands.Cog):
 
         await self.bot.db.wordle.start_season(inter.guild.id, inter.channel.id, start.isoformat(), end.isoformat())
 
-        processed = 0
-        async for message in inter.channel.history(limit=50):
-            if await self.process_wordle_result_message(message):
-                processed += 1
-            processed += await self.process_wordle_summary_message(message)
+        processed = await self.sync_channel_history(inter.channel, start, end)
 
         await inter.followup.send(
             f"Started Wordle season from `{start.isoformat()}` to `{end.isoformat()}`. Processed {processed} existing result(s).",
             ephemeral=True,
         )
+
+    async def sync_channel_history(self, channel, start, end) -> int:
+        after, before = get_history_bounds(start, end)
+        processed = 0
+
+        async for message in channel.history(limit=None, after=after, before=before, oldest_first=True):
+            if await self.process_wordle_result_message(message):
+                processed += 1
+            processed += await self.process_wordle_summary_message(message)
+
+        return processed
+
+    @wordle.subcommand(name="sync", description="Sync past Wordle messages for the active season")
+    async def wordle_sync(self, inter: Interaction) -> None:
+        await inter.response.defer(ephemeral=True)
+
+        if not can_manage_wordle(inter.user):
+            await inter.followup.send("Only staff can sync Wordle seasons.", ephemeral=True)
+            return
+
+        if not is_wordle_channel(inter.channel):
+            await inter.followup.send("Run this in #wordle.", ephemeral=True)
+            return
+
+        season = await self.bot.db.wordle.get_active_season(inter.guild.id)
+        if not season:
+            await inter.followup.send("No active Wordle season.", ephemeral=True)
+            return
+
+        start = parse_date(season["start_date"])
+        end = parse_date(season["end_date"])
+        processed = await self.sync_channel_history(inter.channel, start, end)
+
+        await inter.followup.send(f"Synced {processed} Wordle result(s).", ephemeral=True)
 
     @wordle.subcommand(name="leaderboard", description="Show the active Wordle leaderboard")
     async def wordle_leaderboard(self, inter: Interaction) -> None:
@@ -183,7 +255,7 @@ class Wordle(commands.Cog):
         if message.guild is None or message.author.bot:
             return False
 
-        if getattr(message.channel, "name", None) != "wordle":
+        if not is_wordle_channel(message.channel):
             return False
 
         result = parse_wordle_result(message.content)
@@ -220,7 +292,7 @@ class Wordle(commands.Cog):
         if message.guild is None or not message.author.bot:
             return 0
 
-        if getattr(message.channel, "name", None) != "wordle":
+        if not is_wordle_channel(message.channel):
             return 0
 
         text = get_message_text(message)
@@ -297,7 +369,7 @@ class Wordle(commands.Cog):
     async def on_message(self, message: nextcord.Message) -> None:
         await self.process_wordle_result_message(message)
 
-        if message.guild and message.author.bot and getattr(message.channel, "name", None) == "wordle":
+        if message.guild and message.author.bot and is_wordle_channel(message.channel):
             if is_wordle_summary_message(get_message_text(message)):
                 await asyncio.sleep(5)
                 await self.post_leaderboard(message)
