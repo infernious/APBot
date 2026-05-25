@@ -73,6 +73,7 @@ def test_is_image_attachment_checks_content_type_or_extension():
 def test_tags_database_keeps_user_tags_private():
     db = make_tags_db()
 
+    asyncio.run(db.create(1, 10, "z tag", "second", None))
     asyncio.run(db.create(1, 10, "unit circle", "mine", None))
     asyncio.run(db.create(1, 20, "unit circle", "theirs", "https://example.com/a.png"))
 
@@ -82,10 +83,43 @@ def test_tags_database_keeps_user_tags_private():
 
     assert my_tag["content"] == "mine"
     assert their_tag["content"] == "theirs"
-    assert len(my_tags) == 1
+    assert [tag["name"] for tag in my_tags] == ["unit circle", "z tag"]
     assert my_tags[0]["user_id"] == 10
 
     asyncio.run(db.delete(1, 10, "unit circle"))
 
     assert asyncio.run(db.get_tag(1, 10, "unit circle")) is None
     assert asyncio.run(db.get_tag(1, 20, "unit circle")) is not None
+
+
+def test_tags_database_blocks_duplicate_names_for_same_user():
+    db = make_tags_db()
+
+    asyncio.run(db.create(1, 10, "unit circle", "mine", None))
+
+    try:
+        asyncio.run(db.create(1, 10, "unit circle", "duplicate", None))
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Expected duplicate tag creation to fail")
+
+    tags = asyncio.run(db.get_all(1, 10))
+    assert len(tags) == 1
+    assert tags[0]["content"] == "mine"
+
+
+def test_tags_database_update_is_user_scoped():
+    db = make_tags_db()
+
+    asyncio.run(db.create(1, 10, "unit circle", "mine", None))
+    asyncio.run(db.create(1, 20, "unit circle", "theirs", None))
+
+    asyncio.run(db.update(1, 10, "unit circle", "updated", "https://example.com/new.png"))
+
+    my_tag = asyncio.run(db.get_tag(1, 10, "unit circle"))
+    their_tag = asyncio.run(db.get_tag(1, 20, "unit circle"))
+
+    assert my_tag["content"] == "updated"
+    assert my_tag["image_url"] == "https://example.com/new.png"
+    assert their_tag["content"] == "theirs"

@@ -731,7 +731,8 @@ class TagsDatabase(BaseDatabase):
         )
 
     async def get_all(self, guild_id: int, user_id: int) -> list:
-        return await self.tags.find({"guild_id": guild_id, "user_id": user_id}).to_list(length=None)
+        tags = await self.tags.find({"guild_id": guild_id, "user_id": user_id}).to_list(length=None)
+        return sorted(tags, key=lambda tag: tag.get("name", ""))
 
     async def get_tag(self, guild_id: int, user_id: int, name: str) -> Optional[dict]:
         return await self.tags.find_one({"guild_id": guild_id, "user_id": user_id, "name": name})
