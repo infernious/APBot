@@ -14,6 +14,7 @@ database_client = motor.AsyncIOMotorClient(os.getenv("APBOT_DATABASE_CONNECT_URL
 from models import Infraction
 import logging
 from typing import Optional
+import re
 logger = logging.getLogger(__name__)
 
 
@@ -137,52 +138,63 @@ class BaseDatabase(metaclass=SingletonMeta):
         user_config = await self.read_user_config(user_id)
         infractions = user_config.get("infractions", [])
 
-        allowed_keys = {
-            "actiontype", "reason", "moderator", "actiontime", "duration", "attachment_url", "update"
-        }
+        def first_value(*values):
+            for value in values:
+                if value is not None:
+                    return value
+            return None
+
+        def normalize_time(value):
+            if isinstance(value, datetime):
+                dt = value
+            elif isinstance(value, (int, float)):
+                dt = datetime.fromtimestamp(value, timezone.utc)
+            elif isinstance(value, str):
+                try:
+                    dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                except Exception:
+                    dt = datetime.now(timezone.utc)
+            else:
+                dt = datetime.now(timezone.utc)
+
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+
+            return dt.astimezone(timezone.utc)
+
+        def normalize_moderator(value):
+            if value is None:
+                return 0
+
+            if hasattr(value, "id"):
+                return value.id
+
+            if isinstance(value, int):
+                return value
+
+            if isinstance(value, str):
+                digits = "".join(char for char in value if char.isdigit())
+                if digits:
+                    return int(digits)
+
+            return value
 
         cleaned_infractions = []
+
         for inf in infractions:
-            # backward compatibility
-            if "type" in inf:
-                inf["actiontype"] = inf.pop("type")
-
-            cleaned = {k: v for k, v in inf.items() if k in allowed_keys}
-
-            # 🧩 Fill defaults for missing fields
-            cleaned.setdefault("reason", "No reason provided")
-            cleaned.setdefault("actiontime", datetime.now(timezone.utc).isoformat())
-            cleaned.setdefault("duration", None)
-            cleaned.setdefault("attachment_url", None)
-            cleaned.setdefault("update", [])
-            cleaned.setdefault("moderator", 0)
-
-            # Convert ISO strings safely to datetime objects
-            try:
-                if isinstance(cleaned["actiontime"], str):
-                    try:
-                        dt = datetime.fromisoformat(cleaned["actiontime"])
-                    except Exception:
-                        dt = datetime.now(timezone.utc)
-
-                    if dt.tzinfo is None:
-                        dt = dt.replace(tzinfo=timezone.utc)
-                    cleaned["actiontime"] = dt
-
-                elif isinstance(cleaned["actiontime"], datetime):
-                    dt = cleaned["actiontime"]
-                    if dt.tzinfo is None:
-                        cleaned["actiontime"] = dt.replace(tzinfo=timezone.utc)
-                else:
-                    cleaned["actiontime"] = datetime.now(timezone.utc)
-            except Exception:
-                cleaned["actiontime"] = datetime.now(timezone.utc)
+            cleaned = {
+                "actiontype": first_value(inf.get("actiontype"), inf.get("type"), "unknown"),
+                "reason": first_value(inf.get("reason"), inf.get("mute_reason"), "No reason provided"),
+                "moderator": normalize_moderator(first_value(inf.get("moderator"), inf.get("mute_moderator"), 0)),
+                "actiontime": normalize_time(first_value(inf.get("actiontime"), inf.get("date"))),
+                "duration": inf.get("duration"),
+                "attachment_url": first_value(inf.get("attachment_url"), inf.get("attachment")),
+                "update": inf.get("update") or [],
+            }
 
             cleaned_infractions.append(Infraction(**cleaned))
 
         return cleaned_infractions
-
-
 
     async def read_bot_config(self, name: str):
         return await self.bot_config.find_one({"name": name})

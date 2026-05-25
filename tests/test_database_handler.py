@@ -108,7 +108,7 @@ def test_add_infraction_round_trip_normalizes_storage_and_points():
     assert restored[0].actiontime.tzinfo == timezone.utc
 
 
-def test_get_user_infractions_normalizes_legacy_records():
+def test_get_user_infractions_normalizes_basic_legacy_records():
     db = make_base_db(
         [
             {
@@ -131,4 +131,36 @@ def test_get_user_infractions_normalizes_legacy_records():
     assert infractions[0].actiontype == "warn"
     assert infractions[0].reason == "No reason provided"
     assert infractions[0].moderator == 0
-    assert infractions[0].actiontime.tzinfo == timezone.utc
+    assert infractions[0].actiontime == datetime(2024, 2, 3, 10, 15, 0, tzinfo=timezone.utc)
+
+
+def test_get_user_infractions_normalizes_old_mute_records():
+    db = make_base_db(
+        [
+            {
+                "_id": 1,
+                "user_id": 5,
+                "infraction_points": 0,
+                "infractions": [
+                    {
+                        "type": "mute",
+                        "mute_reason": "Old spam reason",
+                        "mute_moderator": "<@999999999999999999>",
+                        "date": datetime(2024, 2, 3, 10, 15, 0),
+                        "duration": 1800,
+                        "attachment": "https://example.com/old.png",
+                    }
+                ],
+            }
+        ]
+    )
+
+    infractions = asyncio.run(db.get_user_infractions(5))
+
+    assert len(infractions) == 1
+    assert infractions[0].actiontype == "mute"
+    assert infractions[0].reason == "Old spam reason"
+    assert infractions[0].moderator == 999999999999999999
+    assert infractions[0].duration == 1800
+    assert infractions[0].attachment_url == "https://example.com/old.png"
+    assert infractions[0].actiontime == datetime(2024, 2, 3, 10, 15, 0, tzinfo=timezone.utc)

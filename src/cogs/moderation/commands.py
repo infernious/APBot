@@ -209,7 +209,7 @@ class ModerationCommands(commands.Cog):
             actiontype="warn",
             reason=reason,
             moderator=inter.user,
-            actiontime=datetime.now()
+            actiontime=datetime.now(timezone.utc)
         )
 
         # Add infraction to the database
@@ -250,7 +250,12 @@ class ModerationCommands(commands.Cog):
         ),
         attachment: Attachment = None,
     ):
-        duration_seconds: int = convert_time(duration)
+        duration_seconds = convert_time(duration)
+
+        if isinstance(duration_seconds, str):
+            await interaction.response.send_message(duration_seconds, ephemeral=True)
+            return
+
         time_until = timedelta(seconds=duration_seconds)
 
         # Defer interaction immediately without follow-up message
@@ -264,7 +269,7 @@ class ModerationCommands(commands.Cog):
             actiontype="mute",
             reason=reason,
             moderator=interaction.user,
-            actiontime=datetime.now(),
+            actiontime=datetime.now(timezone.utc),
             duration=duration_seconds,
             attachment_url=attachment.proxy_url if attachment else None
         )
@@ -273,7 +278,7 @@ class ModerationCommands(commands.Cog):
         await self.bot.db.base_db.add_infraction(member.id, mute)
         await self.bot.db.emergency.set_cooldown(member.id, minutes=60 * 24)
         # Calculate unmute time
-        unmute_time = datetime.now() + timedelta(seconds=duration_seconds)
+        unmute_time = datetime.now(timezone.utc) + timedelta(seconds=duration_seconds)
 
         # Send the infraction response (DM user, log to #logs, trigger 30+ update)
         await self.infraction_response(interaction, member=member, infraction=mute)
@@ -290,7 +295,7 @@ class ModerationCommands(commands.Cog):
                 f"**Will be unmuted at:** <t:{int(unmute_time.timestamp())}:f> (<t:{int(unmute_time.timestamp())}:R>)"
             ),
             color=self.bot.colors.get("light_orange", Color.orange()),
-            timestamp=datetime.now()
+            timestamp=datetime.now(timezone.utc)
         )
 
         # Add infraction point summary below everything
@@ -339,7 +344,12 @@ class ModerationCommands(commands.Cog):
             required=True
         ),
     ):
-        duration_seconds: int = convert_time(duration)
+        duration_seconds = convert_time(duration)
+
+        if isinstance(duration_seconds, str):
+            await interaction.response.send_message(duration_seconds, ephemeral=True)
+            return
+
         time_until = timedelta(seconds=duration_seconds)
 
         # Acknowledge the interaction quickly
@@ -352,21 +362,21 @@ class ModerationCommands(commands.Cog):
             actiontype="pseudo-mute",
             reason=reason,
             moderator=interaction.user,
-            actiontime=datetime.now(),
+            actiontime=datetime.now(timezone.utc),
             duration=duration_seconds
         )
 
         # Send the infraction response
         await self.infraction_response(interaction, member=member, infraction=mute)
         # Calculate unmute time
-        unmute_time = datetime.now() + timedelta(seconds=duration_seconds)
+        unmute_time = datetime.now(timezone.utc) + timedelta(seconds=duration_seconds)
 
         # Send embedded message about the mute
         mute_embed = Embed(
             title="Member Muted!",
             description=f"{member.mention} has been muted.\n\n**Reason:**\n{reason}\n\n**Will be unmuted at:** <t:{int(unmute_time.timestamp())}:f> (<t:{int(unmute_time.timestamp())}:R>)",
             color=self.bot.colors.get("light_orange", Color.orange()),  # Use your defined color or light orange
-            timestamp=datetime.now()
+            timestamp=datetime.now(timezone.utc)
         )
 
         mute_embed.set_footer(text=f"Muted by {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
@@ -396,7 +406,7 @@ class ModerationCommands(commands.Cog):
             actiontype="unmute",
             reason=reason,
             moderator=interaction.user,
-            actiontime=datetime.now()
+            actiontime=datetime.now(timezone.utc)
         )
 
         # Send infraction response to logs channel
@@ -438,7 +448,7 @@ class ModerationCommands(commands.Cog):
             actiontype="kick",
             reason=reason,
             moderator=interaction.user,
-            actiontime=datetime.now(),
+            actiontime=datetime.now(timezone.utc),
             attachment_url=attachment.proxy_url if attachment else None
         )
 
@@ -512,7 +522,7 @@ class ModerationCommands(commands.Cog):
             actiontype="ban",
             reason=reason,
             moderator=interaction.user,
-            actiontime=datetime.now(),
+            actiontime=datetime.now(timezone.utc),
             attachment_url=attachment.proxy_url if attachment else None
         )
         await self.bot.db.base_db.add_infraction(member.id, ban_inf)
@@ -556,7 +566,7 @@ class ModerationCommands(commands.Cog):
             actiontype="force-ban",
             reason=reason,
             moderator=interaction.user,
-            actiontime=datetime.now(),
+            actiontime=datetime.now(timezone.utc),
             attachment_url=attachment.proxy_url if attachment else None
         )
         await self.bot.db.base_db.add_infraction(user.id, forceban_inf)
@@ -608,7 +618,7 @@ class ModerationCommands(commands.Cog):
             actiontype="unban",
             reason=reason,
             moderator=interaction.user,
-            actiontime=datetime.now()
+            actiontime=datetime.now(timezone.utc)
         )
         await self.infraction_response(interaction, member=user, infraction=unban_inf)
 
@@ -624,7 +634,7 @@ class ModerationCommands(commands.Cog):
             title="Member Unbanned!",
             description=f"{user.mention} has been unbanned.\n\n**Reason:**\n{reason}",
             color=self.bot.colors.get("green", Color.green()),
-            timestamp=datetime.now()
+            timestamp=datetime.now(timezone.utc)
         )
         embed.set_footer(text=f"Unbanned by {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
         await interaction.followup.send(embed=embed)
