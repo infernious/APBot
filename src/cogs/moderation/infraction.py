@@ -30,8 +30,12 @@ class Infraction(commands.Cog):
     def has_mod_role(self, member: Member) -> bool:
         allowed_role_names = {"Trial Chat Moderator", "Chat Moderator", "Admin"}
         allowed_role_ids = {
-            conf.get("bot_staff_role_id"),
-            conf.get("special_perms_role_id"),
+            role_id
+            for role_id in (
+                conf.get("bot_staff_role_id"),
+                conf.get("special_perms_role_id"),
+            )
+            if role_id is not None
         }
 
         perms = getattr(member, "guild_permissions", None)
