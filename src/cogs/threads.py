@@ -8,6 +8,26 @@ config_path = "config.json"
 conf = Config(config_path)
 
 blue = Color.teal()
+QOTD_CHANNEL_NAME = "qotd"
+QOTD_CURATOR_ROLE_NAME = "QOTD Curator"
+QOTD_THREAD_CONFIG_NAME = "qotd_thread_check"
+
+
+def is_qotd_thread(thread: nextcord.Thread) -> bool:
+    parent = getattr(thread, "parent", None)
+    return (getattr(parent, "name", "") or "").lower() == QOTD_CHANNEL_NAME
+
+
+def has_qotd_curator_role(member) -> bool:
+    return any(getattr(role, "name", None) == QOTD_CURATOR_ROLE_NAME for role in getattr(member, "roles", []))
+
+
+def thread_created_at(thread: nextcord.Thread):
+    return getattr(thread, "created_at", None) or getattr(thread, "archive_timestamp", None)
+
+
+def is_thread_closed(thread: nextcord.Thread) -> bool:
+    return bool(getattr(thread, "archived", False))
 
 """ Under work for later updates """
 class PingHelpers(ui.View):
@@ -73,6 +93,121 @@ class Threads(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
+    async def get_thread_owner(self, thread: nextcord.Thread):
+        owner = getattr(thread, "owner", None)
+        if owner:
+            return owner
+
+        owner_id = getattr(thread, "owner_id", None)
+        guild = getattr(thread, "guild", None)
+        if not owner_id or guild is None:
+            return None
+
+        member = guild.get_member(owner_id)
+        if member:
+            return member
+
+        try:
+            return await guild.fetch_member(owner_id)
+        except (nextcord.NotFound, nextcord.Forbidden, nextcord.HTTPException):
+            return None
+
+    async def qotd_initial_check_done(self) -> bool:
+        config = await self.bot.db.base_db.read_bot_config(QOTD_THREAD_CONFIG_NAME)
+        return bool(config and config.get("initial_check_done"))
+
+    async def mark_qotd_initial_check_done(self) -> None:
+        config = await self.bot.db.base_db.read_bot_config(QOTD_THREAD_CONFIG_NAME) or {
+            "name": QOTD_THREAD_CONFIG_NAME,
+        }
+        config["initial_check_done"] = True
+        await self.bot.db.base_db.update_bot_config(config)
+
+    async def close_thread_if_open(self, thread: nextcord.Thread) -> bool:
+        if is_thread_closed(thread):
+            return False
+
+        try:
+            await thread.edit(archived=True)
+            return True
+        except (nextcord.Forbidden, nextcord.HTTPException):
+            return False
+
+    async def active_qotd_threads(self, parent, current_thread: nextcord.Thread) -> list[nextcord.Thread]:
+        return [
+            candidate
+            for candidate in getattr(parent, "threads", [])
+            if candidate.id != current_thread.id
+        ]
+
+    async def archived_qotd_threads(
+        self,
+        parent,
+        current_thread: nextcord.Thread,
+        *,
+        limit: int | None,
+    ) -> list[nextcord.Thread]:
+        if not hasattr(parent, "archived_threads"):
+            return []
+
+        threads = []
+        try:
+            async for candidate in parent.archived_threads(limit=limit):
+                if candidate.id != current_thread.id:
+                    threads.append(candidate)
+        except (nextcord.Forbidden, nextcord.HTTPException):
+            return []
+
+        return threads
+
+    def dedupe_threads(self, threads: list[nextcord.Thread]) -> list[nextcord.Thread]:
+        deduped = {}
+        for thread in threads:
+            deduped[thread.id] = thread
+        return list(deduped.values())
+
+    async def get_all_previous_qotd_threads(self, thread: nextcord.Thread) -> list[nextcord.Thread]:
+        parent = thread.parent
+        candidates = await self.active_qotd_threads(parent, thread)
+        candidates.extend(await self.archived_qotd_threads(parent, thread, limit=None))
+        return self.dedupe_threads(candidates)
+
+    async def get_most_recent_previous_qotd_thread(self, thread: nextcord.Thread):
+        parent = thread.parent
+        candidates = await self.active_qotd_threads(parent, thread)
+
+        if not candidates:
+            candidates.extend(await self.archived_qotd_threads(parent, thread, limit=1))
+
+        candidates = self.dedupe_threads(candidates)
+        if not candidates:
+            return None
+
+        return max(candidates, key=lambda candidate: thread_created_at(candidate) or candidate.id)
+
+    async def close_qotd_threads_for_new_thread(self, thread: nextcord.Thread) -> None:
+        if await self.qotd_initial_check_done():
+            previous_thread = await self.get_most_recent_previous_qotd_thread(thread)
+            if previous_thread:
+                await self.close_thread_if_open(previous_thread)
+            return
+
+        previous_threads = await self.get_all_previous_qotd_threads(thread)
+        for previous_thread in previous_threads:
+            await self.close_thread_if_open(previous_thread)
+
+        await self.mark_qotd_initial_check_done()
+
+    async def handle_qotd_thread_create(self, thread: nextcord.Thread) -> bool:
+        if not is_qotd_thread(thread):
+            return False
+
+        owner = await self.get_thread_owner(thread)
+        if owner and has_qotd_curator_role(owner):
+            await self.close_qotd_threads_for_new_thread(thread)
+
+        return True
+
     @slash_command(name="resolve", description="Mark a thread as resolved and archive it.")
     async def resolve(self, interaction: Interaction):
         """
@@ -119,6 +254,9 @@ class Threads(commands.Cog):
         - Sends initial message in forum post when created with option to dismiss.
         - After 10 minutes, provides an option to ping helpers.
         """
+        if await self.handle_qotd_thread_create(thread):
+            return
+
         if thread.parent.name in ["modmail", "important-updates"]:
             return
 
