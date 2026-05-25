@@ -704,31 +704,37 @@ class TagsDatabase(BaseDatabase):
     def __init__(self, conf=None):
         super().__init__(conf)
 
-    async def exists(self, guild_id: int, name: str) -> bool:
-        tag = await self.tags.find_one({"guild_id": guild_id, "name": name})
+    async def exists(self, guild_id: int, user_id: int, name: str) -> bool:
+        tag = await self.tags.find_one({"guild_id": guild_id, "user_id": user_id, "name": name})
         return tag is not None
 
-    async def create(self, guild_id: int, user_id: int, name: str, content: str) -> None:
-        tag_dict = await self.tags.find_one({"guild_id": guild_id, "name": name})
-        if tag_dict is None:
-            tag_dict = {"guild_id": guild_id, "user_id": user_id, "name": name, "content": content}
-            await self.tags.insert_one(tag_dict)
-        else:
+    async def create(self, guild_id: int, user_id: int, name: str, content: str, image_url: Optional[str] = None) -> None:
+        tag_dict = await self.tags.find_one({"guild_id": guild_id, "user_id": user_id, "name": name})
+        if tag_dict is not None:
             raise ValueError("Tag with this name already exists.")
 
-    async def delete(self, guild_id: int, name: str) -> None:
-        await self.tags.delete_one({"guild_id": guild_id, "name": name})
+        await self.tags.insert_one({
+            "guild_id": guild_id,
+            "user_id": user_id,
+            "name": name,
+            "content": content,
+            "image_url": image_url,
+        })
 
-    async def update(self, guild_id: int, name: str, new_content: str) -> None:
-        await self.tags.update_one({"guild_id": guild_id, "name": name}, {"$set": {"content": new_content}})
+    async def delete(self, guild_id: int, user_id: int, name: str) -> None:
+        await self.tags.delete_one({"guild_id": guild_id, "user_id": user_id, "name": name})
 
-    async def get_all(self, guild_id: int) -> list:
-        tags = await self.tags.find({"guild_id": guild_id}).to_list(length=None)
-        return tags
+    async def update(self, guild_id: int, user_id: int, name: str, new_content: str, image_url: Optional[str] = None) -> None:
+        await self.tags.update_one(
+            {"guild_id": guild_id, "user_id": user_id, "name": name},
+            {"$set": {"content": new_content, "image_url": image_url}},
+        )
 
-    async def get_tag(self, guild_id: int, name: str) -> Optional[dict]:
-        tag = await self.tags.find_one({"guild_id": guild_id, "name": name})
-        return tag if tag else None
+    async def get_all(self, guild_id: int, user_id: int) -> list:
+        return await self.tags.find({"guild_id": guild_id, "user_id": user_id}).to_list(length=None)
+
+    async def get_tag(self, guild_id: int, user_id: int, name: str) -> Optional[dict]:
+        return await self.tags.find_one({"guild_id": guild_id, "user_id": user_id, "name": name})
 
     async def clear_all_tags(self) -> None:
         await self.tags.delete_many({})
