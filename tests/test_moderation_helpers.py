@@ -26,3 +26,15 @@ def test_to_snowflake_parses_mentions_and_ints():
     assert to_snowflake("<@123456789012345678>") == 123456789012345678
     assert to_snowflake("not-a-user") is None
     assert to_snowflake(None) is None
+
+from cogs.moderation.commands import validate_selfmute_duration
+
+
+def test_validate_selfmute_duration_accepts_bounds():
+    assert validate_selfmute_duration("10m") == (600, None)
+    assert validate_selfmute_duration("168h") == (604800, None)
+
+
+def test_validate_selfmute_duration_rejects_out_of_range():
+    assert validate_selfmute_duration("9m")[0] is None
+    assert validate_selfmute_duration("169h")[0] is None

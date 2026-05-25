@@ -21,6 +21,19 @@ from cogs.utils import convert_time
 
 conf = load_optional_config()
 COMMAND_GUILD_IDS = get_command_guild_ids(conf)
+MIN_SELFMUTE_SECONDS = 600
+MAX_SELFMUTE_SECONDS = 604800
+
+
+def validate_selfmute_duration(duration: str):
+    duration_seconds = convert_time(duration)
+    if isinstance(duration_seconds, str):
+        return None, duration_seconds
+    if duration_seconds < MIN_SELFMUTE_SECONDS:
+        return None, "Selfmute must be at least 10 minutes."
+    if duration_seconds > MAX_SELFMUTE_SECONDS:
+        return None, "Selfmute cannot be longer than 168 hours."
+    return duration_seconds, None
 
 class Infraction:
     def __init__(
@@ -382,6 +395,73 @@ class ModerationCommands(commands.Cog):
         mute_embed.set_footer(text=f"Muted by {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
 
         await interaction.followup.send(embed=mute_embed)
+    @slash_command(
+        name="selfmute",
+        description="Mute yourself from 10 minutes up to 168 hours.",
+        guild_ids=COMMAND_GUILD_IDS,
+    )
+    async def selfmute(
+        self,
+        interaction: Interaction,
+        duration: str = SlashOption(
+            name="duration",
+            description="Selfmute duration from 10m to 168h. Format: 5h9m2s",
+            required=True,
+        ),
+    ):
+        duration_seconds, error = validate_selfmute_duration(duration)
+        if error:
+            await interaction.response.send_message(error, ephemeral=True)
+            return
+
+        member = interaction.user
+        if not hasattr(member, "timeout"):
+            await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+            return
+
+        time_until = timedelta(seconds=duration_seconds)
+        now = datetime.now(timezone.utc)
+        unmute_time = now + time_until
+        reason = f"Selfmute requested by {member} ({member.id})"
+
+        try:
+            await member.timeout(timeout=time_until, reason=reason)
+        except Forbidden:
+            await interaction.response.send_message("I do not have permission to mute you.", ephemeral=True)
+            return
+        except nextcord.HTTPException:
+            await interaction.response.send_message("Failed to apply selfmute.", ephemeral=True)
+            return
+
+        embed = Embed(
+            title="Selfmute Enabled",
+            description=(
+                f"You have selfmuted until <t:{int(unmute_time.timestamp())}:f> "
+                f"(<t:{int(unmute_time.timestamp())}:R>)."
+            ),
+            color=self.bot.colors.get("light_orange", Color.orange()),
+            timestamp=now,
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+        logs_channel = nextcord.utils.get(interaction.guild.text_channels, name="logs") if interaction.guild else None
+        if logs_channel:
+            log_embed = Embed(
+                title="Selfmute Logged",
+                description=(
+                    f"User: {member.mention} (`{member.id}`)\n"
+                    f"Duration: {duration}\n"
+                    f"Will be unmuted at: <t:{int(unmute_time.timestamp())}:f> "
+                    f"(<t:{int(unmute_time.timestamp())}:R>)"
+                ),
+                color=self.bot.colors.get("light_orange", Color.orange()),
+                timestamp=now,
+            )
+            try:
+                await logs_channel.send(embed=log_embed)
+            except Forbidden:
+                pass
+
     @slash_command(
         name="unmute",
         description="Unmute a member.",
