@@ -28,8 +28,27 @@ class Infraction(commands.Cog):
         self.bot = bot
 
     def has_mod_role(self, member: Member) -> bool:
-        allowed_roles = {"Trial Chat Moderator", "Chat Moderator", "Admin"}
-        return any(role.name in allowed_roles for role in member.roles)
+        allowed_role_names = {"Trial Chat Moderator", "Chat Moderator", "Admin"}
+        allowed_role_ids = {
+            conf.get("bot_staff_role_id"),
+            conf.get("special_perms_role_id"),
+        }
+
+        perms = getattr(member, "guild_permissions", None)
+
+        if getattr(perms, "administrator", False):
+            return True
+
+        if getattr(perms, "moderate_members", False):
+            return True
+
+        for role in member.roles:
+            if role.name in allowed_role_names:
+                return True
+            if getattr(role, "id", None) in allowed_role_ids:
+                return True
+
+        return False
 
     @slash_command(
         name="warnings",
@@ -44,16 +63,18 @@ class Infraction(commands.Cog):
             )
             return
 
-        await inter.response.defer(with_message=False)
+        await inter.response.defer(with_message=True)
 
         infractions = await self.bot.db.base_db.get_user_infractions(member.id)
         inf_points = await self.bot.db.base_db.add_inf_points(member.id, 0)
 
+        fetching_msg = await inter.original_message()
+
         if not infractions:
-            await inter.followup.send(f"{member.mention} has no infractions.")
+            await fetching_msg.edit(content=f"{member.mention} has no infractions.")
             return
 
-        fetching_msg = await inter.channel.send(f"Fetching {member.mention}'s warnings...")
+        await fetching_msg.edit(content=f"Fetching {member.mention}'s warnings...")
 
         color_map = {
             "warn": self.bot.colors.get("yellow", Color.yellow()),
@@ -134,11 +155,23 @@ class Infraction(commands.Cog):
             if getattr(inf, "duration", None):
                 try:
                     dur = inf.duration
-                    duration_seconds = (
-                        int(dur.total_seconds()) if isinstance(dur, timedelta) else int(dur)
-                    )
-                    hours = duration_seconds // 3600
-                    duration_line = f"Duration: {hours}h\n"
+                    duration_seconds = int(dur.total_seconds()) if isinstance(dur, timedelta) else int(dur)
+
+                    days, rem = divmod(duration_seconds, 86400)
+                    hours, rem = divmod(rem, 3600)
+                    minutes, seconds = divmod(rem, 60)
+
+                    parts = []
+                    if days:
+                        parts.append(f"{days}d")
+                    if hours:
+                        parts.append(f"{hours}h")
+                    if minutes:
+                        parts.append(f"{minutes}m")
+                    if seconds:
+                        parts.append(f"{seconds}s")
+
+                    duration_line = f"Duration: {' '.join(parts) if parts else '0s'}\n"
                 except (ValueError, TypeError, AttributeError):
                     pass
 
@@ -156,8 +189,8 @@ class Infraction(commands.Cog):
 
             await inter.channel.send(embed=embed)
 
-        await fetching_msg.reply(
-            f"Complete, all infractions shown! {member.mention} has `{inf_points}` infraction point(s)."
+        await fetching_msg.edit(
+            content=f"Complete, all infractions shown! {member.mention} has `{inf_points}` infraction point(s)."
         )
         
     @slash_command(
