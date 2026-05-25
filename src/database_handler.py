@@ -737,6 +737,7 @@ class TagsDatabase(BaseDatabase):
         await self.tags.delete_many({"user_id": user_id})
     
 
+
 class WordleDatabase(BaseDatabase):
     def __init__(self, conf=None):
         super().__init__(conf)
@@ -771,7 +772,7 @@ class WordleDatabase(BaseDatabase):
         channel_id: int,
         user_id: int,
         username: str,
-        puzzle: int,
+        puzzle,
         tries,
         failed: bool,
         hard_mode: bool,
@@ -780,19 +781,27 @@ class WordleDatabase(BaseDatabase):
         message_id: int,
         season_start: str,
         season_end: str,
+        source: str,
     ) -> None:
+        query = {
+            "guild_id": guild_id,
+            "user_id": user_id,
+            "played_date": played_date,
+            "season_start": season_start,
+            "season_end": season_end,
+        }
+
+        existing = await self.wordle_results.find_one(query)
+        if existing and existing.get("source") == "user_share" and source == "wordle_bot_summary" and not hard_mode:
+            return
+
         await self.wordle_results.update_one(
-            {
-                "guild_id": guild_id,
-                "user_id": user_id,
-                "puzzle": puzzle,
-                "season_start": season_start,
-                "season_end": season_end,
-            },
+            query,
             {
                 "$set": {
                     "channel_id": channel_id,
                     "username": username,
+                    "puzzle": puzzle,
                     "tries": tries,
                     "failed": failed,
                     "hard_mode": hard_mode,
@@ -801,6 +810,7 @@ class WordleDatabase(BaseDatabase):
                     "message_id": message_id,
                     "season_start": season_start,
                     "season_end": season_end,
+                    "source": source,
                 }
             },
             upsert=True,
@@ -830,7 +840,6 @@ class WordleDatabase(BaseDatabase):
             users[user_id]["failures"] += 1 if doc.get("failed") else 0
 
         return sorted(users.values(), key=lambda row: (row["total_score"], -row["games"], row["username"].lower()))
-
 
 
 class RecurrentDatabase(BaseDatabase):

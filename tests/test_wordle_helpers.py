@@ -1,4 +1,11 @@
-from cogs.wordle import format_wordle_leaderboard, is_wordle_summary_message, parse_date, parse_wordle_result
+from cogs.wordle import (
+    format_wordle_leaderboard,
+    is_wordle_summary_message,
+    parse_date,
+    parse_wordle_result,
+    parse_wordle_summary_text,
+    wordle_score,
+)
 
 
 def test_parse_wordle_result_normal():
@@ -35,9 +42,36 @@ def test_parse_wordle_result_invalid():
     assert parse_wordle_result("push was playing") is None
 
 
+def test_parse_wordle_summary_text():
+    text = "Here are yesterday's results:\\n3/6*: <@111>\\n4/6: <@222> <@!333>\\nX/6: <@444>"
+
+    results = parse_wordle_summary_text(text)
+
+    assert results[0]["user_id"] == 111
+    assert results[0]["tries"] == 3
+    assert results[0]["hard_mode"] is True
+    assert results[0]["score"] == 2
+    assert results[1]["user_id"] == 222
+    assert results[1]["tries"] == 4
+    assert results[1]["hard_mode"] is False
+    assert results[1]["score"] == 4
+    assert results[2]["user_id"] == 333
+    assert results[3]["user_id"] == 444
+    assert results[3]["failed"] is True
+    assert results[3]["score"] == 7
+
+
 def test_is_wordle_summary_message():
     assert is_wordle_summary_message("Your group is on a 7 day streak. Here are yesterday's results") is True
-    assert is_wordle_summary_message("push was playing") is False
+    assert is_wordle_summary_message("3/6: <@111>") is True
+    assert is_wordle_summary_message("push was playing\\n1 finished game of Wordle") is True
+    assert is_wordle_summary_message("hello") is False
+
+
+def test_wordle_score():
+    assert wordle_score(3, False, False) == 3
+    assert wordle_score(3, False, True) == 2
+    assert wordle_score(None, True, False) == 7
 
 
 def test_parse_date():
