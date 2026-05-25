@@ -2,7 +2,12 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
-from startup import startup
+from startup import DEFAULT_COGS, startup
+
+
+def test_default_cogs_load_server_log_instead_of_delete_log():
+    assert "cogs.server_log" in DEFAULT_COGS
+    assert "cogs.delete_log" not in DEFAULT_COGS
 
 
 class FakeConf:

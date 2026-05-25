@@ -64,6 +64,7 @@ Create a file called `config.json` and include the following variables:
   "command_prefix": "ap:",
   "modmail_channel": ,
   "appeals_channel_id": ,
+  "server_log_channel": ,
   "bot_logs_channel":
 }
 ```
@@ -75,6 +76,7 @@ Descriptions:
 - `ban_appeal_server`: Server used for ban appeals
 - `modmail_channel`: ID of the `#modmail` channel
 - `appeals_channel_id`: ID of the `#ban-appeals` channel
+- `server_log_channel`: ID of the `#server-log` channel
 - `bot_logs_channel`: ID of the `#bot-log` channel
 
 If you are only using one server, you can ignore:
