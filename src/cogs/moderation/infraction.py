@@ -10,18 +10,70 @@ from datetime import timezone
 
 conf = load_optional_config()
 COMMAND_GUILD_IDS = get_command_guild_ids(conf)
+DISCORD_EPOCH_MS = 1420070400000
+
+
+def is_possible_snowflake(value: int) -> bool:
+    text = str(value)
+    if not 17 <= len(text) <= 20:
+        return False
+
+    created_ms = (value >> 22) + DISCORD_EPOCH_MS
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    return DISCORD_EPOCH_MS <= created_ms <= now_ms + 86400000
+
+
+def add_snowflake_candidate(candidates: list[int], seen: set[int], value: str) -> None:
+    try:
+        candidate = int(value)
+    except (TypeError, ValueError):
+        return
+
+    if candidate in seen:
+        return
+
+    if not is_possible_snowflake(candidate):
+        return
+
+    seen.add(candidate)
+    candidates.append(candidate)
+
+
+def snowflake_candidates(value) -> list[int]:
+    candidates: list[int] = []
+    seen: set[int] = set()
+
+    if value is None:
+        return candidates
+
+    if hasattr(value, "id"):
+        value = value.id
+
+    text = str(value)
+
+    for match in re.finditer(r"<@!?(\d{17,20})>", text):
+        add_snowflake_candidate(candidates, seen, match.group(1))
+
+    for match in re.finditer(r"(?<!\d)(\d{17,20})(?!\d)", text):
+        add_snowflake_candidate(candidates, seen, match.group(1))
+
+    for match in re.finditer(r"\d{18,}", text):
+        digits = match.group(0)
+
+        for size in range(min(20, len(digits) - 1), 16, -1):
+            add_snowflake_candidate(candidates, seen, digits[:size])
+            add_snowflake_candidate(candidates, seen, digits[-size:])
+
+        for size in range(min(20, len(digits) - 1), 16, -1):
+            for start in range(1, len(digits) - size):
+                add_snowflake_candidate(candidates, seen, digits[start:start + size])
+
+    return candidates
 
 
 def to_snowflake(value):
-    if value is None:
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        m = re.search(r"\d{17,20}", value)
-        if m:
-            return int(m.group(0))
-    return None
+    candidates = snowflake_candidates(value)
+    return candidates[0] if candidates else None
 
 
 def format_update_date(value):
@@ -67,6 +119,65 @@ def format_infraction_updates(updates):
 class Infraction(commands.Cog):
     def __init__(self, bot: APBot) -> None:
         self.bot = bot
+
+    async def fetch_moderator_from_id(self, guild, moderator_id: int):
+        if guild is not None:
+            member = guild.get_member(moderator_id)
+
+            if member is not None:
+                return member
+
+            try:
+                member = await guild.fetch_member(moderator_id)
+
+                if member is not None:
+                    return member
+            except (AttributeError, nextcord.NotFound, nextcord.Forbidden, nextcord.HTTPException):
+                pass
+
+        try:
+            cached_user = self.bot.get_user(moderator_id)
+
+            if cached_user is not None:
+                return cached_user
+        except AttributeError:
+            pass
+
+        try:
+            return await self.bot.fetch_user(moderator_id)
+        except (AttributeError, nextcord.NotFound, nextcord.Forbidden, nextcord.HTTPException):
+            return None
+
+    async def resolve_moderator(self, guild, raw_moderator):
+        candidates = snowflake_candidates(raw_moderator)
+
+        for moderator_id in candidates:
+            moderator = await self.fetch_moderator_from_id(guild, moderator_id)
+
+            if moderator is not None:
+                return moderator, moderator_id
+
+        fallback_id = candidates[0] if candidates else None
+        return None, fallback_id
+
+    def format_moderator(self, raw_moderator, moderator, moderator_id: Optional[int]) -> str:
+        if moderator is not None:
+            display = (
+                getattr(moderator, "global_name", None)
+                or getattr(moderator, "display_name", None)
+                or getattr(moderator, "name", None)
+                or str(moderator)
+            )
+            mention = getattr(moderator, "mention", f"<@{moderator_id}>")
+            return f"{mention} ({display})"
+
+        if moderator_id is not None:
+            return f"<@{moderator_id}> (not found)"
+
+        if raw_moderator:
+            return f"`{raw_moderator}` (invalid legacy moderator ID)"
+
+        return "Unknown moderator"
 
     def has_mod_role(self, member: Member) -> bool:
         allowed_role_names = {"Trial Chat Moderator", "Chat Moderator", "Admin"}
@@ -143,37 +254,9 @@ class Infraction(commands.Cog):
                 )
             reason = inf.reason or "No reason provided"
 
-            # ---- Moderator lookup (fixed) ----
             raw_mod = getattr(inf, "moderator", None)
-            moderator_id = to_snowflake(raw_mod)
-
-            mod = None
-            if moderator_id:
-                # Try guild cache first (only if in a guild)
-                if inter.guild is not None:
-                    mod = inter.guild.get_member(moderator_id)
-
-                # Fallback to API fetch
-                if mod is None:
-                    try:
-                        mod = await self.bot.fetch_user(moderator_id)
-                    except nextcord.HTTPException:
-                        mod = None
-
-            # Build moderator display:
-            # - If we found the user => mention + display name
-            # - If not => still mention the ID if we have one, else show whatever was stored
-            if mod:
-                display = getattr(mod, "global_name", None) or mod.name
-                mod_line = f"{mod.mention} ({display})"
-            else:
-                if moderator_id:
-                    mod_line = f"<@{moderator_id}> (unknown)"
-                else:
-                    mod_line = f"{raw_mod} (unknown)" if raw_mod else "Unknown moderator"
-            # -------------------------------
-
-
+            mod, moderator_id = await self.resolve_moderator(inter.guild, raw_mod)
+            mod_line = self.format_moderator(raw_mod, mod, moderator_id)
 
             time_val = getattr(inf, "actiontime", None)
 

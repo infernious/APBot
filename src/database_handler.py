@@ -16,6 +16,48 @@ import logging
 from typing import Optional
 import re
 logger = logging.getLogger(__name__)
+DISCORD_EPOCH_MS = 1420070400000
+
+
+def is_possible_snowflake(value: int) -> bool:
+    text = str(value)
+    if not 17 <= len(text) <= 20:
+        return False
+
+    created_ms = (value >> 22) + DISCORD_EPOCH_MS
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    return DISCORD_EPOCH_MS <= created_ms <= now_ms + 86400000
+
+
+def first_snowflake(value):
+    if value is None:
+        return None
+
+    if hasattr(value, "id"):
+        value = value.id
+
+    text = str(value)
+
+    for pattern in (r"<@!?(\d{17,20})>", r"(?<!\d)(\d{17,20})(?!\d)"):
+        match = re.search(pattern, text)
+
+        if match:
+            candidate = int(match.group(1))
+
+            if is_possible_snowflake(candidate):
+                return candidate
+
+    for match in re.finditer(r"\d{18,}", text):
+        digits = match.group(0)
+
+        for size in range(min(20, len(digits) - 1), 16, -1):
+            for candidate_text in (digits[:size], digits[-size:]):
+                candidate = int(candidate_text)
+
+                if is_possible_snowflake(candidate):
+                    return candidate
+
+    return None
 
 
 
@@ -219,16 +261,10 @@ class BaseDatabase(metaclass=SingletonMeta):
             if value is None:
                 return 0
 
-            if hasattr(value, "id"):
-                return value.id
+            moderator_id = first_snowflake(value)
 
-            if isinstance(value, int):
-                return value
-
-            if isinstance(value, str):
-                digits = "".join(char for char in value if char.isdigit())
-                if digits:
-                    return int(digits)
+            if moderator_id is not None:
+                return moderator_id
 
             return value
 
