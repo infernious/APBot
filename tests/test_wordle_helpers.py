@@ -196,6 +196,47 @@ def test_process_wordle_result_message_records_wordle_bot_share():
     assert kwargs["source"] == "wordle_bot_share"
 
 
+def test_on_message_posts_leaderboard_for_wordle_bot_share():
+    player = SimpleNamespace(id=111, display_name="Player")
+    season = {"start_date": "2026-05-25", "end_date": "2026-05-25"}
+    wordle_db = SimpleNamespace(
+        get_active_season=AsyncMock(return_value=season),
+        save_result=AsyncMock(),
+        get_leaderboard=AsyncMock(return_value=[
+            {"user_id": 111, "total_score": 2, "games": 1, "hard_games": 1, "failures": 0},
+        ]),
+    )
+    bot = SimpleNamespace(db=SimpleNamespace(wordle=wordle_db), colors={})
+    cog = Wordle(bot=bot)
+    embed = SimpleNamespace(
+        title="Wordle 1,800 3/6*",
+        description="",
+        fields=[],
+        footer=None,
+    )
+    channel = SimpleNamespace(id=10, name="wordle", send=AsyncMock())
+    message = SimpleNamespace(
+        guild=SimpleNamespace(id=1),
+        author=SimpleNamespace(bot=True, name="Wordle", display_name="Wordle"),
+        channel=channel,
+        content="",
+        embeds=[embed],
+        interaction_metadata=SimpleNamespace(user=player),
+        created_at=datetime(2026, 5, 25, tzinfo=timezone.utc),
+        id=59,
+    )
+
+    asyncio.run(cog.on_message(message))
+
+    wordle_db.save_result.assert_awaited_once()
+    wordle_db.get_leaderboard.assert_awaited_once_with(1, "2026-05-25", "2026-05-25")
+    channel.send.assert_awaited_once()
+    sent_embed = channel.send.await_args.kwargs["embed"]
+    assert sent_embed.title == "Updated Wordle Leaderboard"
+    assert "<@111>" in sent_embed.description
+    assert "2 pts" in sent_embed.description
+
+
 def test_process_wordle_summary_requires_wordle_bot():
     wordle_db = SimpleNamespace(
         get_active_season=AsyncMock(return_value={"start_date": "2026-05-25", "end_date": "2026-05-25"}),

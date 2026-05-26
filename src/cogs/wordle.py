@@ -245,6 +245,28 @@ class Wordle(commands.Cog):
 
         return member.display_name
 
+    async def send_leaderboard(self, channel, guild_id: int, season: dict, title: str = "Updated Wordle Leaderboard") -> None:
+        rows = await self.bot.db.wordle.get_leaderboard(
+            guild_id,
+            season["start_date"],
+            season["end_date"],
+        )
+
+        embed = Embed(
+            title=title,
+            description=format_wordle_leaderboard(rows),
+            color=self.bot.colors.get("green", nextcord.Color.green()),
+        )
+
+        await channel.send(embed=embed)
+
+    async def post_current_leaderboard(self, message: nextcord.Message) -> None:
+        season = await self.bot.db.wordle.get_active_season(message.guild.id)
+        if not season:
+            return
+
+        await self.send_leaderboard(message.channel, message.guild.id, season)
+
     @slash_command(name="wordle", description="Manage the Wordle leaderboard", guild_ids=COMMAND_GUILD_IDS)
     async def wordle(self, inter: Interaction):
         pass
@@ -452,25 +474,14 @@ class Wordle(commands.Cog):
         if processed == 0:
             return
 
-        rows = await self.bot.db.wordle.get_leaderboard(
-            message.guild.id,
-            season["start_date"],
-            season["end_date"],
-        )
-
-        embed = Embed(
-            title="Updated Wordle Leaderboard",
-            description=format_wordle_leaderboard(rows),
-            color=self.bot.colors.get("green", nextcord.Color.green()),
-        )
-
-        await message.channel.send(embed=embed)
+        await self.send_leaderboard(message.channel, message.guild.id, season)
         await self.bot.db.wordle.set_last_summary_message(message.guild.id, message.id)
 
     @commands.Cog.listener()
     async def on_message(self, message: nextcord.Message) -> None:
         if message.guild and is_wordle_bot_author(message.author) and is_wordle_channel(message.channel):
-            await self.process_wordle_result_message(message)
+            if await self.process_wordle_result_message(message):
+                await self.post_current_leaderboard(message)
 
             if is_wordle_summary_message(get_message_text(message)):
                 await asyncio.sleep(5)
