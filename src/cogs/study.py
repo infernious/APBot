@@ -3,16 +3,49 @@ import time
 import asyncio
 import nextcord
 
-from nextcord import Interaction, Embed, Attachment, Message, slash_command, SlashOption
-from nextcord.ext import commands
-from typing import Union
+from nextcord import Interaction, Embed, Attachment, slash_command, SlashOption
+from nextcord.ext import commands, tasks
 
 from cogs.utils import convert_time
 
 blue = nextcord.Color.teal()
-from config_handler import Config
-config_path = "config.json"
-conf = Config(config_path)
+from app_config import get_command_guild_ids, load_optional_config
+conf = load_optional_config()
+COMMAND_GUILD_IDS = get_command_guild_ids(conf)
+
+MIN_STUDY_SECONDS = 60 * 10
+MAX_STUDY_SECONDS = 60 * 60 * 24 * 7
+
+
+def validate_study_duration(duration: str):
+    duration_seconds = convert_time(duration)
+
+    if isinstance(duration_seconds, str):
+        return None, duration_seconds
+
+    if duration_seconds < MIN_STUDY_SECONDS:
+        return None, "Please set a duration greater than or equal to 10 minutes."
+
+    if duration_seconds > MAX_STUDY_SECONDS:
+        return None, "Please set a duration less than or equal to one week."
+
+    return duration_seconds, None
+
+
+def get_study_delay_seconds(study_end: int, now: int | None = None) -> int:
+    current_time = int(time.time()) if now is None else now
+    return max(0, int(study_end) - current_time)
+
+
+async def send_study_role_dm(member, study_end: int) -> bool:
+    try:
+        await member.send(
+            f"You enabled Study Mode. The Study role will be removed <t:{study_end}:R> at <t:{study_end}:f>."
+        )
+    except (nextcord.Forbidden, nextcord.HTTPException):
+        return False
+
+    return True
 
 
 class QuestionConfirm(nextcord.ui.View):
@@ -51,9 +84,13 @@ class Study(commands.Cog):
         self.bot = bot
         self.last_topic_update = {}
         self.potd_cooldowns = {}
+
+    def cog_unload(self) -> None:
+        if self.expire_study_roles.is_running():
+            self.expire_study_roles.cancel()
         
 
-    @slash_command(name="question", description="Ask a question in a subject channel.", guild_ids=[conf.get("guild_id")])
+    @slash_command(name="question", description="Ask a question in a subject channel.", guild_ids=COMMAND_GUILD_IDS)
     async def question(
         self,
         inter: Interaction,
@@ -106,7 +143,7 @@ class Study(commands.Cog):
 
 
 
-    @slash_command(name="potd", description="Make a problem-of-the-day for a subject channel.", guild_ids=[conf.get("guild_id")])
+    @slash_command(name="potd", description="Make a problem-of-the-day for a subject channel.", guild_ids=COMMAND_GUILD_IDS)
     async def potd(
         self,
         inter: Interaction,
@@ -174,21 +211,57 @@ class Study(commands.Cog):
 
 
 
-    async def remove_study_role(self, user_id: int) -> None:
+    @tasks.loop(minutes=1)
+    async def expire_study_roles(self) -> None:
         try:
-            guild = await self.bot.fetch_guild(self.bot.config.get("guild_id"))
+            study_users = await self.bot.db.study.get_all()
+        except Exception as exc:
+            print(f"[Study] Failed to fetch study role expirations: {exc}")
+            return
+
+        now = int(time.time())
+        for user_id, study_end in study_users.items():
+            try:
+                if int(study_end) <= now:
+                    await self.remove_study_role(int(user_id))
+            except Exception:
+                continue
+
+    @expire_study_roles.before_loop
+    async def before_expire_study_roles(self) -> None:
+        await self.bot.wait_until_ready()
+
+    @commands.Cog.listener()
+    async def on_ready(self) -> None:
+        if not self.expire_study_roles.is_running():
+            self.expire_study_roles.start()
+
+    async def remove_study_role(self, user_id: int) -> None:
+        guild_id = self.bot.config.get("guild_id")
+
+        try:
+            guild = await self.bot.getch_guild(guild_id)
             user = await self.bot.getch_member(guild.id, user_id)
             study_role = nextcord.utils.get(guild.roles, name="Study")
-        except:
+        except Exception:
             return
 
-        if not user or not study_role:
+        if not study_role:
             return
+
+        if not user:
+            await self.bot.db.study.delete_user(user_id)
+            return
+
+        if study_role.id in [role.id for role in user.roles]:
+            try:
+                await user.remove_roles(study_role, reason="Study role duration expired.")
+            except (nextcord.Forbidden, nextcord.HTTPException):
+                return
 
         await self.bot.db.study.delete_user(user_id)
-        await user.remove_roles(study_role)
 
-    @slash_command(name="study", description="Prevent yourself from viewing unhelpful channels.", guild_ids=[conf.get("guild_id")])
+    @slash_command(name="study", description="Prevent yourself from viewing unhelpful channels.", guild_ids=COMMAND_GUILD_IDS)
     async def study(
         self,
         inter: Interaction,
@@ -197,32 +270,36 @@ class Study(commands.Cog):
         await inter.response.defer(ephemeral=True)
         resp = await inter.send("Validating time input...", ephemeral=True)
 
-        duration: Union[str, int] = convert_time(duration)
-        if isinstance(duration, str):
-            return await resp.edit(content=duration)
+        duration_seconds, error = validate_study_duration(duration)
+        if error:
+            return await resp.edit(content=error)
 
-        if duration < 60 * 10:
-            return await resp.edit("Please set a duration greater than 10 minutes!")
-        if duration > 60 * 60 * 24 * 7:
-            return await resp.edit("Please set a duration lesser than a week")
+        await resp.edit(content="Performing actions...")
+        study_end = int(time.time()) + duration_seconds
 
-        await resp.edit("Performing actions...")
-        study_end = int(time.time()) + duration
+        guild = await self.bot.getch_guild(self.bot.config.get("guild_id"))
+        if not guild:
+            return await resp.edit(content="Server not found.")
 
-        guild = await self.bot.fetch_guild(self.bot.config.get("guild_id"))
         study_role = nextcord.utils.get(guild.roles, name="Study")
-        if study_role.id in [role.id for role in inter.user.roles]:
-            await resp.edit("Removing role...")
-            await self.remove_study_role(inter.user.id)
+        if study_role is None:
+            return await resp.edit(content="Study role not found.")
 
-        await inter.user.add_roles(study_role)
-        await resp.edit("Updating database...")
+        user_role_ids = {role.id for role in inter.user.roles}
+        if study_role.id not in user_role_ids:
+            await inter.user.add_roles(study_role, reason="Study role enabled by user.")
+        await resp.edit(content="Updating database...")
 
         await self.bot.db.study.set_time(inter.user.id, study_end)
 
-        self.bot.loop.call_later(duration, asyncio.create_task, self.remove_study_role(inter.user.id))
+        user_id = inter.user.id
+        self.bot.loop.call_later(
+            get_study_delay_seconds(study_end),
+            lambda user_id=user_id: asyncio.create_task(self.remove_study_role(user_id)),
+        )
+        await send_study_role_dm(inter.user, study_end)
         await resp.edit(
-            f"The study role will be removed <t:{study_end}:R> at <t:{study_end}:f>."
+            content=f"The study role will be removed <t:{study_end}:R> at <t:{study_end}:f>."
         )
 
     class ConfirmDeny(nextcord.ui.View):

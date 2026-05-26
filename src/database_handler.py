@@ -16,6 +16,273 @@ import logging
 from typing import Optional
 import re
 logger = logging.getLogger(__name__)
+DISCORD_EPOCH_MS = 1420070400000
+DURATION_UNITS = {
+    "s": 1,
+    "sec": 1,
+    "secs": 1,
+    "second": 1,
+    "seconds": 1,
+    "m": 60,
+    "min": 60,
+    "mins": 60,
+    "minute": 60,
+    "minutes": 60,
+    "h": 3600,
+    "hr": 3600,
+    "hrs": 3600,
+    "hour": 3600,
+    "hours": 3600,
+    "d": 86400,
+    "day": 86400,
+    "days": 86400,
+    "w": 604800,
+    "week": 604800,
+    "weeks": 604800,
+}
+MAX_TIMEOUT_DURATION_SECONDS = 28 * 86400
+
+
+def is_possible_snowflake(value: int) -> bool:
+    text = str(value)
+    if not 17 <= len(text) <= 20:
+        return False
+
+    created_ms = (value >> 22) + DISCORD_EPOCH_MS
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    return DISCORD_EPOCH_MS <= created_ms <= now_ms + 86400000
+
+
+def first_snowflake(value):
+    if value is None:
+        return None
+
+    if hasattr(value, "id"):
+        value = value.id
+
+    text = str(value)
+
+    for pattern in (r"<@!?(\d{17,20})>", r"(?<!\d)(\d{17,20})(?!\d)"):
+        match = re.search(pattern, text)
+
+        if match:
+            candidate = int(match.group(1))
+
+            if is_possible_snowflake(candidate):
+                return candidate
+
+    for match in re.finditer(r"\d{18,}", text):
+        digits = match.group(0)
+
+        for size in range(min(20, len(digits) - 1), 16, -1):
+            for candidate_text in (digits[:size], digits[-size:]):
+                candidate = int(candidate_text)
+
+                if is_possible_snowflake(candidate):
+                    return candidate
+
+        for size in range(min(20, len(digits) - 1), 16, -1):
+            for start in range(1, len(digits) - size):
+                candidate = int(digits[start:start + size])
+
+                if is_possible_snowflake(candidate):
+                    return candidate
+
+    return None
+
+
+def parse_duration_string(value: str) -> Optional[int]:
+    text = value.strip().lower()
+
+    if not text:
+        return None
+
+    if text.isdigit():
+        duration = int(text)
+        return duration if duration > 0 else None
+
+    time_parts = text.split(":")
+    if 2 <= len(time_parts) <= 3 and all(part.isdigit() for part in time_parts):
+        numbers = [int(part) for part in time_parts]
+
+        if len(numbers) == 2:
+            minutes, seconds = numbers
+            duration = minutes * 60 + seconds
+            return duration if duration > 0 else None
+
+        hours, minutes, seconds = numbers
+        duration = hours * 3600 + minutes * 60 + seconds
+        return duration if duration > 0 else None
+
+    day_prefix = 0
+    day_match = re.match(r"^(\d+)\s+days?,\s*(.+)$", text)
+
+    if day_match:
+        day_prefix = int(day_match.group(1)) * 86400
+        text = day_match.group(2)
+        time_duration = parse_duration_string(text)
+        return day_prefix + time_duration if time_duration is not None else None
+
+    matches = list(
+        re.finditer(
+            r"(\d+(?:\.\d+)?)\s*(weeks?|w|days?|d|hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)",
+            text,
+        )
+    )
+
+    if not matches:
+        return None
+
+    leftovers = re.sub(
+        r"(\d+(?:\.\d+)?)\s*(weeks?|w|days?|d|hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)",
+        "",
+        text,
+    )
+    leftovers = re.sub(r"[\s,;:+-]", "", leftovers)
+
+    if leftovers:
+        return None
+
+    total = 0
+
+    for match in matches:
+        amount, unit = match.groups()
+        total += float(amount) * DURATION_UNITS[unit]
+
+    duration = int(total)
+    return duration if duration > 0 else None
+
+
+def normalize_duration(value) -> Optional[int]:
+    if value is None:
+        return None
+
+    if isinstance(value, timedelta):
+        duration = int(value.total_seconds())
+        return duration if duration > 0 else None
+
+    if isinstance(value, (int, float)):
+        duration = int(value)
+
+        if duration <= 0:
+            return None
+
+        if duration > MAX_TIMEOUT_DURATION_SECONDS and duration % 1000 == 0:
+            duration_ms = duration // 1000
+
+            if 0 < duration_ms <= MAX_TIMEOUT_DURATION_SECONDS:
+                return duration_ms
+
+        return duration
+
+    if isinstance(value, str):
+        return parse_duration_string(value)
+
+    return None
+
+
+def normalize_duration_milliseconds(value) -> Optional[int]:
+    if value is None:
+        return None
+
+    if isinstance(value, str) and not value.strip().isdigit():
+        return normalize_duration(value)
+
+    try:
+        duration = int(value)
+    except (TypeError, ValueError):
+        return None
+
+    if duration <= 0:
+        return None
+
+    duration_seconds = duration // 1000
+    return duration_seconds if duration_seconds > 0 else None
+
+
+def normalize_actiontype(value) -> str:
+    action = str(value or "unknown").strip().lower().replace("_", "-")
+    action = re.sub(r"\s+", "-", action)
+
+    aliases = {
+        "wm": "mute",
+        "warn-mute": "mute",
+        "warnmute": "mute",
+        "warning-mute": "mute",
+        "pseudomute": "pseudo-mute",
+        "pseudo-mute": "pseudo-mute",
+        "forceban": "force-ban",
+        "force-ban": "force-ban",
+        "internal-note": "note",
+    }
+
+    return aliases.get(action, action or "unknown")
+
+
+def normalize_attachment(value):
+    if value is None:
+        return None
+
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            normalized = normalize_attachment(item)
+
+            if normalized:
+                return normalized
+
+        return None
+
+    if isinstance(value, dict):
+        return normalize_attachment(
+            value.get("url")
+            or value.get("proxy_url")
+            or value.get("attachment_url")
+            or value.get("filename")
+        )
+
+    text = str(value).strip()
+    return text or None
+
+
+def legacy_unmute_update(infraction: dict):
+    moderator = (
+        infraction.get("unmute_moderator")
+        or infraction.get("unmuted_by")
+        or infraction.get("unmute_mod")
+    )
+    reason = (
+        infraction.get("unmute_reason")
+        or infraction.get("unmuted_reason")
+        or infraction.get("unmute_note")
+    )
+
+    if not moderator and not reason:
+        return None
+
+    return {
+        "moderator": moderator or "Unknown moderator",
+        "update": f"Unmuted: {reason or 'No reason provided'}",
+        "date": (
+            infraction.get("unmute_date")
+            or infraction.get("unmuted_at")
+            or infraction.get("unmute_time")
+            or infraction.get("date")
+            or infraction.get("actiontime")
+        ),
+    }
+
+
+def normalize_updates(value) -> list:
+    if not value:
+        return []
+
+    if isinstance(value, list):
+        return list(value)
+
+    if isinstance(value, tuple):
+        return list(value)
+
+    return [value]
 
 
 
@@ -134,6 +401,59 @@ class BaseDatabase(metaclass=SingletonMeta):
 
 
 
+
+    async def update_infraction_reason(self, user_id: int, index: int, reason: str) -> bool:
+        user_config = await self.read_user_config(user_id)
+        infractions = user_config.get("infractions", [])
+
+        if index < 1 or index > len(infractions):
+            return False
+
+        infraction = infractions[index - 1]
+        infraction["reason"] = reason
+        infraction["mute_reason"] = reason
+        await self.update_user_config(user_id, user_config)
+        return True
+
+    async def delete_infraction(self, user_id: int, index: int) -> bool:
+        user_config = await self.read_user_config(user_id)
+        infractions = user_config.get("infractions", [])
+
+        if index < 1 or index > len(infractions):
+            return False
+
+        del infractions[index - 1]
+        user_config["infractions"] = infractions
+        await self.update_user_config(user_id, user_config)
+        return True
+
+    async def add_infraction_note(self, user_id: int, index: int, moderator_id: int, note: str, actiontime=None) -> bool:
+        user_config = await self.read_user_config(user_id)
+        infractions = user_config.get("infractions", [])
+
+        if index < 1 or index > len(infractions):
+            return False
+
+        if actiontime is None:
+            actiontime = datetime.now(timezone.utc)
+
+        if isinstance(actiontime, datetime):
+            if actiontime.tzinfo is None:
+                actiontime = actiontime.replace(tzinfo=timezone.utc)
+            actiontime = actiontime.astimezone(timezone.utc).isoformat()
+
+        infraction = infractions[index - 1]
+        updates = normalize_updates(infraction.get("update"))
+        updates.append({
+            "moderator": moderator_id,
+            "update": note,
+            "date": actiontime,
+        })
+        infraction["update"] = updates
+
+        await self.update_user_config(user_id, user_config)
+        return True
+
     async def get_user_infractions(self, user_id: int) -> list:
         user_config = await self.read_user_config(user_id)
         infractions = user_config.get("infractions", [])
@@ -166,30 +486,59 @@ class BaseDatabase(metaclass=SingletonMeta):
             if value is None:
                 return 0
 
-            if hasattr(value, "id"):
-                return value.id
+            moderator_id = first_snowflake(value)
 
-            if isinstance(value, int):
-                return value
-
-            if isinstance(value, str):
-                digits = "".join(char for char in value if char.isdigit())
-                if digits:
-                    return int(digits)
+            if moderator_id is not None:
+                return moderator_id
 
             return value
 
         cleaned_infractions = []
 
         for inf in infractions:
+            updates = normalize_updates(
+                inf.get("update") if inf.get("update") is not None else inf.get("updates")
+            )
+            unmute_update = legacy_unmute_update(inf)
+
+            if unmute_update:
+                updates.append(unmute_update)
+
+            duration = normalize_duration(
+                first_value(
+                    inf.get("duration"),
+                    inf.get("mute_duration"),
+                    inf.get("mute_length"),
+                    inf.get("mute_time"),
+                    inf.get("duration_seconds"),
+                    inf.get("mute_duration_seconds"),
+                    inf.get("length"),
+                )
+            )
+            duration_ms = normalize_duration_milliseconds(
+                first_value(
+                    inf.get("duration_ms"),
+                    inf.get("mute_duration_ms"),
+                    inf.get("length_ms"),
+                )
+            )
+
             cleaned = {
-                "actiontype": first_value(inf.get("actiontype"), inf.get("type"), "unknown"),
+                "actiontype": normalize_actiontype(first_value(inf.get("actiontype"), inf.get("type"), "unknown")),
                 "reason": first_value(inf.get("reason"), inf.get("mute_reason"), "No reason provided"),
                 "moderator": normalize_moderator(first_value(inf.get("moderator"), inf.get("mute_moderator"), 0)),
                 "actiontime": normalize_time(first_value(inf.get("actiontime"), inf.get("date"))),
-                "duration": inf.get("duration"),
-                "attachment_url": first_value(inf.get("attachment_url"), inf.get("attachment")),
-                "update": inf.get("update") or [],
+                "duration": duration if duration is not None else duration_ms,
+                "attachment_url": normalize_attachment(
+                    first_value(
+                        inf.get("attachment_url"),
+                        inf.get("attachment"),
+                        inf.get("attachments"),
+                        inf.get("evidence"),
+                        inf.get("image_url"),
+                    )
+                ),
+                "update": updates,
             }
 
             cleaned_infractions.append(Infraction(**cleaned))
@@ -704,31 +1053,38 @@ class TagsDatabase(BaseDatabase):
     def __init__(self, conf=None):
         super().__init__(conf)
 
-    async def exists(self, guild_id: int, name: str) -> bool:
-        tag = await self.tags.find_one({"guild_id": guild_id, "name": name})
+    async def exists(self, guild_id: int, user_id: int, name: str) -> bool:
+        tag = await self.tags.find_one({"guild_id": guild_id, "user_id": user_id, "name": name})
         return tag is not None
 
-    async def create(self, guild_id: int, user_id: int, name: str, content: str) -> None:
-        tag_dict = await self.tags.find_one({"guild_id": guild_id, "name": name})
-        if tag_dict is None:
-            tag_dict = {"guild_id": guild_id, "user_id": user_id, "name": name, "content": content}
-            await self.tags.insert_one(tag_dict)
-        else:
+    async def create(self, guild_id: int, user_id: int, name: str, content: str, image_url: Optional[str] = None) -> None:
+        tag_dict = await self.tags.find_one({"guild_id": guild_id, "user_id": user_id, "name": name})
+        if tag_dict is not None:
             raise ValueError("Tag with this name already exists.")
 
-    async def delete(self, guild_id: int, name: str) -> None:
-        await self.tags.delete_one({"guild_id": guild_id, "name": name})
+        await self.tags.insert_one({
+            "guild_id": guild_id,
+            "user_id": user_id,
+            "name": name,
+            "content": content,
+            "image_url": image_url,
+        })
 
-    async def update(self, guild_id: int, name: str, new_content: str) -> None:
-        await self.tags.update_one({"guild_id": guild_id, "name": name}, {"$set": {"content": new_content}})
+    async def delete(self, guild_id: int, user_id: int, name: str) -> None:
+        await self.tags.delete_one({"guild_id": guild_id, "user_id": user_id, "name": name})
 
-    async def get_all(self, guild_id: int) -> list:
-        tags = await self.tags.find({"guild_id": guild_id}).to_list(length=None)
-        return tags
+    async def update(self, guild_id: int, user_id: int, name: str, new_content: str, image_url: Optional[str] = None) -> None:
+        await self.tags.update_one(
+            {"guild_id": guild_id, "user_id": user_id, "name": name},
+            {"$set": {"content": new_content, "image_url": image_url}},
+        )
 
-    async def get_tag(self, guild_id: int, name: str) -> Optional[dict]:
-        tag = await self.tags.find_one({"guild_id": guild_id, "name": name})
-        return tag if tag else None
+    async def get_all(self, guild_id: int, user_id: int) -> list:
+        tags = await self.tags.find({"guild_id": guild_id, "user_id": user_id}).to_list(length=None)
+        return sorted(tags, key=lambda tag: tag.get("name", ""))
+
+    async def get_tag(self, guild_id: int, user_id: int, name: str) -> Optional[dict]:
+        return await self.tags.find_one({"guild_id": guild_id, "user_id": user_id, "name": name})
 
     async def clear_all_tags(self) -> None:
         await self.tags.delete_many({})

@@ -1,6 +1,6 @@
-import nextcord
 import re
-from nextcord import slash_command, Permissions, Interaction, User, Embed, Member, TextChannel, Object, Color
+import nextcord
+from nextcord import slash_command, Permissions, Interaction, Embed, Member, TextChannel, Color, SlashOption
 from nextcord.ext import commands
 from typing import Optional
 from bot_base import APBot
@@ -10,22 +10,245 @@ from datetime import timezone
 
 conf = load_optional_config()
 COMMAND_GUILD_IDS = get_command_guild_ids(conf)
+DISCORD_EPOCH_MS = 1420070400000
+IMAGE_URL_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp")
+
+
+def clip_text(value, limit: int = 1000) -> str:
+    text = str(value or "")
+    return text if len(text) <= limit else f"{text[:limit - 3]}..."
+
+
+def is_possible_snowflake(value: int) -> bool:
+    text = str(value)
+    if not 17 <= len(text) <= 20:
+        return False
+
+    created_ms = (value >> 22) + DISCORD_EPOCH_MS
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    return DISCORD_EPOCH_MS <= created_ms <= now_ms + 86400000
+
+
+def add_snowflake_candidate(candidates: list[int], seen: set[int], value: str) -> None:
+    try:
+        candidate = int(value)
+    except (TypeError, ValueError):
+        return
+
+    if candidate in seen:
+        return
+
+    if not is_possible_snowflake(candidate):
+        return
+
+    seen.add(candidate)
+    candidates.append(candidate)
+
+
+def snowflake_candidates(value) -> list[int]:
+    candidates: list[int] = []
+    seen: set[int] = set()
+
+    if value is None:
+        return candidates
+
+    if hasattr(value, "id"):
+        value = value.id
+
+    text = str(value)
+
+    for match in re.finditer(r"<@!?(\d{17,20})>", text):
+        add_snowflake_candidate(candidates, seen, match.group(1))
+
+    for match in re.finditer(r"(?<!\d)(\d{17,20})(?!\d)", text):
+        add_snowflake_candidate(candidates, seen, match.group(1))
+
+    for match in re.finditer(r"\d{18,}", text):
+        digits = match.group(0)
+
+        for size in range(min(20, len(digits) - 1), 16, -1):
+            add_snowflake_candidate(candidates, seen, digits[:size])
+            add_snowflake_candidate(candidates, seen, digits[-size:])
+
+        for size in range(min(20, len(digits) - 1), 16, -1):
+            for start in range(1, len(digits) - size):
+                add_snowflake_candidate(candidates, seen, digits[start:start + size])
+
+    return candidates
 
 
 def to_snowflake(value):
-    if value is None:
+    candidates = snowflake_candidates(value)
+    return candidates[0] if candidates else None
+
+
+def format_update_date(value):
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, str):
+        try:
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return "unknown time"
+    else:
+        return "unknown time"
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+
+    return f"<t:{int(dt.timestamp())}:R>"
+
+
+def format_action_name(actiontype: str) -> str:
+    action = actiontype or "unknown"
+
+    if action == "note":
+        return "Internal Note"
+
+    return action.replace("-", " ").title()
+
+
+def format_duration(value) -> Optional[str]:
+    if not value:
         return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        m = re.search(r"\d{17,20}", value)
-        if m:
-            return int(m.group(0))
-    return None
+
+    try:
+        duration_seconds = int(value.total_seconds()) if isinstance(value, timedelta) else int(value)
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+    if duration_seconds <= 0:
+        return None
+
+    days, rem = divmod(duration_seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, seconds = divmod(rem, 60)
+
+    parts = []
+    if days:
+        parts.append(f"{days}d")
+    if hours:
+        parts.append(f"{hours}h")
+    if minutes:
+        parts.append(f"{minutes}m")
+    if seconds:
+        parts.append(f"{seconds}s")
+
+    return " ".join(parts) if parts else "0s"
+
+
+def is_http_url(value) -> bool:
+    return str(value or "").lower().startswith(("http://", "https://"))
+
+
+def can_embed_image(value) -> bool:
+    if not is_http_url(value):
+        return False
+
+    url = str(value).split("?", 1)[0].split("#", 1)[0].lower()
+    return url.endswith(IMAGE_URL_EXTENSIONS)
+
+
+def format_attachment_line(value) -> str:
+    if not value:
+        return ""
+
+    attachment = str(value).strip()
+
+    if not attachment:
+        return ""
+
+    if is_http_url(attachment):
+        return f"Evidence: [View attachment]({attachment})\n"
+
+    return f"Evidence: `{clip_text(attachment, 200)}`\n"
+
+
+def format_infraction_updates(updates):
+    if not updates:
+        return ""
+
+    lines = []
+    for update in updates[-5:]:
+        if isinstance(update, str):
+            lines.append(f"- {update}")
+            continue
+
+        if not isinstance(update, dict):
+            lines.append(f"- {update}")
+            continue
+
+        moderator = update.get("moderator", "Unknown moderator")
+        moderator_id = to_snowflake(moderator)
+        moderator_text = f"<@{moderator_id}>" if moderator_id else str(moderator)
+        note = clip_text(update.get("update") or update.get("note") or "No note provided", 500)
+        date_text = format_update_date(update.get("date"))
+        lines.append(f"- {note} — {moderator_text}, {date_text}")
+
+    return "Notes:\n" + "\n".join(lines) + "\n"
 
 class Infraction(commands.Cog):
     def __init__(self, bot: APBot) -> None:
         self.bot = bot
+
+    async def fetch_moderator_from_id(self, guild, moderator_id: int):
+        if guild is not None:
+            member = guild.get_member(moderator_id)
+
+            if member is not None:
+                return member
+
+            try:
+                member = await guild.fetch_member(moderator_id)
+
+                if member is not None:
+                    return member
+            except (AttributeError, nextcord.NotFound, nextcord.Forbidden, nextcord.HTTPException):
+                pass
+
+        try:
+            cached_user = self.bot.get_user(moderator_id)
+
+            if cached_user is not None:
+                return cached_user
+        except AttributeError:
+            pass
+
+        try:
+            return await self.bot.fetch_user(moderator_id)
+        except (AttributeError, nextcord.NotFound, nextcord.Forbidden, nextcord.HTTPException):
+            return None
+
+    async def resolve_moderator(self, guild, raw_moderator):
+        candidates = snowflake_candidates(raw_moderator)
+
+        for moderator_id in candidates:
+            moderator = await self.fetch_moderator_from_id(guild, moderator_id)
+
+            if moderator is not None:
+                return moderator, moderator_id
+
+        fallback_id = candidates[0] if candidates else None
+        return None, fallback_id
+
+    def format_moderator(self, raw_moderator, moderator, moderator_id: Optional[int]) -> str:
+        if moderator is not None:
+            display = (
+                getattr(moderator, "global_name", None)
+                or getattr(moderator, "display_name", None)
+                or getattr(moderator, "name", None)
+                or str(moderator)
+            )
+            mention = getattr(moderator, "mention", f"<@{moderator_id}>")
+            return f"{mention} ({display})"
+
+        if moderator_id is not None:
+            return f"<@{moderator_id}> (not found)"
+
+        if raw_moderator:
+            return f"`{raw_moderator}` (invalid legacy moderator ID)"
+
+        return "Unknown moderator"
 
     def has_mod_role(self, member: Member) -> bool:
         allowed_role_names = {"Trial Chat Moderator", "Chat Moderator", "Admin"}
@@ -95,44 +318,12 @@ class Infraction(commands.Cog):
         total = len(infractions)
 
         for index, inf in enumerate(infractions, start=1):
-            action = (
-                    "Internal Note"
-                    if inf.actiontype == "note"
-                    else (inf.actiontype or "unknown").capitalize().replace("-", " ")
-                )
-            reason = inf.reason or "No reason provided"
+            action = format_action_name(inf.actiontype)
+            reason = clip_text(inf.reason or "No reason provided", 1400)
 
-            # ---- Moderator lookup (fixed) ----
             raw_mod = getattr(inf, "moderator", None)
-            moderator_id = to_snowflake(raw_mod)
-
-            mod = None
-            if moderator_id:
-                # Try guild cache first (only if in a guild)
-                if inter.guild is not None:
-                    mod = inter.guild.get_member(moderator_id)
-
-                # Fallback to API fetch
-                if mod is None:
-                    try:
-                        mod = await self.bot.fetch_user(moderator_id)
-                    except nextcord.HTTPException:
-                        mod = None
-
-            # Build moderator display:
-            # - If we found the user => mention + display name
-            # - If not => still mention the ID if we have one, else show whatever was stored
-            if mod:
-                display = getattr(mod, "global_name", None) or mod.name
-                mod_line = f"{mod.mention} ({display})"
-            else:
-                if moderator_id:
-                    mod_line = f"<@{moderator_id}> (unknown)"
-                else:
-                    mod_line = f"{raw_mod} (unknown)" if raw_mod else "Unknown moderator"
-            # -------------------------------
-
-
+            mod, moderator_id = await self.resolve_moderator(inter.guild, raw_mod)
+            mod_line = self.format_moderator(raw_mod, mod, moderator_id)
 
             time_val = getattr(inf, "actiontime", None)
 
@@ -153,43 +344,27 @@ class Infraction(commands.Cog):
             unix = int(time_val.timestamp())
             timestamp = f"<t:{unix}:F> (<t:{unix}:R>)"
 
-
-            # ---- Duration ----
-            duration_line = ""
-            if getattr(inf, "duration", None):
-                try:
-                    dur = inf.duration
-                    duration_seconds = int(dur.total_seconds()) if isinstance(dur, timedelta) else int(dur)
-
-                    days, rem = divmod(duration_seconds, 86400)
-                    hours, rem = divmod(rem, 3600)
-                    minutes, seconds = divmod(rem, 60)
-
-                    parts = []
-                    if days:
-                        parts.append(f"{days}d")
-                    if hours:
-                        parts.append(f"{hours}h")
-                    if minutes:
-                        parts.append(f"{minutes}m")
-                    if seconds:
-                        parts.append(f"{seconds}s")
-
-                    duration_line = f"Duration: {' '.join(parts) if parts else '0s'}\n"
-                except (ValueError, TypeError, AttributeError):
-                    pass
-
+            duration = format_duration(getattr(inf, "duration", None))
+            duration_line = f"Duration: {duration}\n" if duration else ""
+            attachment_url = getattr(inf, "attachment_url", None)
+            attachment_line = format_attachment_line(attachment_url)
+            update_line = format_infraction_updates(getattr(inf, "update", []))
             embed = Embed(
-                title=action,
+                title=f"#{index} - {action}",
                 description=(
+                    f"Index: {index}\n"
                     f"Reason: {reason}\n"
                     f"{duration_line}"
+                    f"{attachment_line}"
                     f"Responsible Mod: {mod_line}\n"
+                    f"{update_line}"
                     f"{index}/{total} infractions • {timestamp}"
                 ),
                 color=color_map.get(getattr(inf, "actiontype", ""), Color.gold()),
             )
 
+            if can_embed_image(attachment_url):
+                embed.set_image(url=attachment_url)
 
             await inter.channel.send(embed=embed)
 
@@ -240,27 +415,47 @@ class Infraction(commands.Cog):
                 )
             )
 
-# Work on later
-#    @slash_command(name="update", description="Update a member's infraction history.", default_member_permissions=Permissions(moderate_members=True))
-#    async def update(self, interaction: Interaction, user:  User, infraction: int, update: str):
-#        member_config = await self.bot.db.base_db.read_user_config(user.id)
-#        infractions = member_config["infractions"]
-#        infraction_update = infractions[infraction]
+    @slash_command(
+        name="update",
+        description="Update a member's infraction history.",
+        default_member_permissions=Permissions(moderate_members=True),
+        guild_ids=COMMAND_GUILD_IDS,
+    )
+    async def update(
+        self,
+        interaction: Interaction,
+        member: Member,
+        index: int,
+        action: str = SlashOption(choices=["reason", "delete", "note"], description="Choose what to update."),
+        text: Optional[str] = SlashOption(description="New reason or note text. Leave empty only for delete.", required=False),
+    ):
+        if not self.has_mod_role(interaction.user):
+            await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+            return
 
-#        if infraction_update.get('update') is None:
-#            infraction_update['update'] = []
+        if index < 1:
+            await interaction.response.send_message("Use the index shown in /warnings, starting at 1.", ephemeral=True)
+            return
 
-#        update_dict = {
-#            "moderator": interaction.user.mention,
-#            "update": update,
-#            "date": datetime.utcnow()
-#        }
+        if action in {"reason", "note"} and not text:
+            await interaction.response.send_message("Text is required for this update type.", ephemeral=True)
+            return
 
-#        infraction_update['update'].append(update_dict)
+        if action == "reason":
+            updated = await self.bot.db.base_db.update_infraction_reason(member.id, index, text)
+            response = f"Updated reason for infraction #{index} on {member.mention}."
+        elif action == "delete":
+            updated = await self.bot.db.base_db.delete_infraction(member.id, index)
+            response = f"Deleted infraction #{index} from {member.mention}'s history. Infraction points were not changed."
+        else:
+            updated = await self.bot.db.base_db.add_infraction_note(member.id, index, interaction.user.id, text)
+            response = f"Added a note to infraction #{index} on {member.mention}."
 
-#        await self.bot.db.base_db.update_user_config(user.id, member_config)  # Save changes
+        if not updated:
+            await interaction.response.send_message("That infraction index does not exist.", ephemeral=True)
+            return
 
-#        await interaction.response.send_message("Infraction updated successfully.", ephemeral=True)
+        await interaction.response.send_message(response, ephemeral=True)
 
     @slash_command(name="userip", description="View a member's infraction points.", default_member_permissions=Permissions(moderate_members=True), guild_ids=COMMAND_GUILD_IDS)
     async def userip(self, interaction: Interaction, member: Member):
