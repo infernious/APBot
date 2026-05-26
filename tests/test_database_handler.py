@@ -424,6 +424,17 @@ def test_add_infraction_note_preserves_single_legacy_update_entry():
     assert stored["infractions"][0]["update"][0]["update"] == "existing context"
     assert stored["infractions"][0]["update"][1]["update"] == "extra context"
 
+def test_wordle_summary_replaces_user_share_for_same_puzzle():
+    db = make_wordle_db()
+
+    asyncio.run(db.save_result(1, 10, 111, "Push", 1801, 3, False, True, 2, "2026-05-01", 100, "2026-05-01", "2026-05-31", "user_share"))
+    asyncio.run(db.save_result(1, 10, 111, "Push", 1801, 4, False, False, 4, "2026-05-01", 101, "2026-05-01", "2026-05-31", "wordle_bot_summary"))
+
+    rows = asyncio.run(db.get_leaderboard(1, "2026-05-01", "2026-05-31"))
+
+    assert rows[0]["total_score"] == 4
+    assert rows[0]["hard_games"] == 0
+    assert db.wordle_results.docs[0]["source"] == "wordle_bot_summary"
 
 def test_delete_infraction_removes_only_selected_index():
     db = make_base_db([

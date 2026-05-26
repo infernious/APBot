@@ -1139,16 +1139,25 @@ class WordleDatabase(BaseDatabase):
         season_end: str,
         source: str,
     ) -> None:
-        query = {
+        base_query = {
             "guild_id": guild_id,
             "user_id": user_id,
-            "played_date": played_date,
             "season_start": season_start,
             "season_end": season_end,
         }
+        query = dict(base_query)
+        if puzzle is not None:
+            query["puzzle"] = puzzle
+        else:
+            query["played_date"] = played_date
 
         existing = await self.wordle_results.find_one(query)
-        if existing and existing.get("source") == "user_share" and source == "wordle_bot_summary" and not hard_mode:
+        if not existing and puzzle is not None:
+            query = dict(base_query)
+            query["played_date"] = played_date
+            existing = await self.wordle_results.find_one(query)
+
+        if existing and existing.get("source") == "wordle_bot_summary" and source != "wordle_bot_summary":
             return
 
         await self.wordle_results.update_one(
