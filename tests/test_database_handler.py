@@ -212,6 +212,30 @@ def test_get_user_infractions_normalizes_old_mute_records():
     assert infractions[0].attachment_url == "https://example.com/old.png"
     assert infractions[0].actiontime == datetime(2024, 2, 3, 10, 15, 0, tzinfo=timezone.utc)
 
+
+def test_get_user_infractions_recovers_legacy_moderator_id_with_extra_digits():
+    db = make_base_db(
+        [
+            {
+                "_id": 1,
+                "user_id": 5,
+                "infraction_points": 0,
+                "infractions": [
+                    {
+                        "type": "warn",
+                        "mute_moderator": "7079852600207606280",
+                        "date": datetime(2024, 2, 3, 10, 15, 0),
+                    }
+                ],
+            }
+        ]
+    )
+
+    infractions = asyncio.run(db.get_user_infractions(5))
+
+    assert infractions[0].moderator == 707985260020760628
+
+
 def test_update_infraction_reason_updates_new_and_legacy_reason_fields():
     db = make_base_db([
         {
