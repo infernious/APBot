@@ -144,6 +144,27 @@ def parse_wordle_puzzle(content: str):
     return int(match.group(1).replace(",", ""))
 
 
+def get_interaction_user(message):
+    interaction_metadata = getattr(message, "interaction_metadata", None)
+    if interaction_metadata and getattr(interaction_metadata, "user", None):
+        return interaction_metadata.user
+
+    interaction = getattr(message, "interaction", None)
+    if interaction and getattr(interaction, "user", None):
+        return interaction.user
+
+    return None
+
+
+def display_name_for_user(user) -> str:
+    return (
+        getattr(user, "display_name", None)
+        or getattr(user, "global_name", None)
+        or getattr(user, "name", None)
+        or str(getattr(user, "id", "Unknown"))
+    )
+
+
 def parse_wordle_summary_text(content: str):
     entries = []
 
@@ -270,7 +291,10 @@ class Wordle(commands.Cog):
         processed = 0
 
         async for message in channel.history(limit=None, after=after, before=before, oldest_first=True):
-            processed += await self.process_wordle_summary_message(message)
+            if await self.process_wordle_result_message(message):
+                processed += 1
+            else:
+                processed += await self.process_wordle_summary_message(message)
 
         return processed
 
@@ -320,9 +344,45 @@ class Wordle(commands.Cog):
         await inter.send(embed=embed)
 
     async def process_wordle_result_message(self, message: nextcord.Message) -> bool:
-        # Only the Wordle bot's daily summary should update the leaderboard.
-        # Member share messages are easy to spoof and can use the wrong puzzle.
-        return False
+        if message.guild is None or not is_wordle_bot_author(message.author):
+            return False
+
+        if not is_wordle_channel(message.channel):
+            return False
+
+        result = parse_wordle_result(get_message_text(message))
+        if result is None:
+            return False
+
+        player = get_interaction_user(message)
+        if player is None or getattr(player, "id", None) is None:
+            return False
+
+        season = await self.bot.db.wordle.get_active_season(message.guild.id)
+        if not season:
+            return False
+
+        played_date = get_message_date(message).isoformat()
+        if not date_in_season(played_date, season):
+            return False
+
+        await self.bot.db.wordle.save_result(
+            guild_id=message.guild.id,
+            channel_id=message.channel.id,
+            user_id=player.id,
+            username=display_name_for_user(player),
+            puzzle=result["puzzle"],
+            tries=result["tries"],
+            failed=result["failed"],
+            hard_mode=result["hard_mode"],
+            score=result["score"],
+            played_date=played_date,
+            message_id=message.id,
+            season_start=season["start_date"],
+            season_end=season["end_date"],
+            source="wordle_bot_share",
+        )
+        return True
 
     async def process_wordle_summary_message(self, message: nextcord.Message) -> int:
         if message.guild is None or not is_wordle_bot_author(message.author):
@@ -410,6 +470,8 @@ class Wordle(commands.Cog):
     @commands.Cog.listener()
     async def on_message(self, message: nextcord.Message) -> None:
         if message.guild and is_wordle_bot_author(message.author) and is_wordle_channel(message.channel):
+            await self.process_wordle_result_message(message)
+
             if is_wordle_summary_message(get_message_text(message)):
                 await asyncio.sleep(5)
                 await self.post_leaderboard(message)

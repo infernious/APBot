@@ -146,6 +146,7 @@ def test_process_wordle_result_message_ignores_member_share():
         author=SimpleNamespace(bot=False, id=111, display_name="Player"),
         channel=SimpleNamespace(id=10, name="wordle"),
         content="Wordle 1,800 3/6*",
+        embeds=[],
         created_at=datetime(2026, 5, 25, tzinfo=timezone.utc),
         id=55,
     )
@@ -154,6 +155,45 @@ def test_process_wordle_result_message_ignores_member_share():
 
     assert processed is False
     wordle_db.save_result.assert_not_awaited()
+
+
+def test_process_wordle_result_message_records_wordle_bot_share():
+    player = SimpleNamespace(id=111, display_name="Player")
+    wordle_db = SimpleNamespace(
+        get_active_season=AsyncMock(return_value={"start_date": "2026-05-25", "end_date": "2026-05-25"}),
+        save_result=AsyncMock(),
+    )
+    bot = SimpleNamespace(db=SimpleNamespace(wordle=wordle_db))
+    cog = Wordle(bot=bot)
+    embed = SimpleNamespace(
+        title="Wordle 1,800 3/6*",
+        description="",
+        fields=[],
+        footer=None,
+    )
+    message = SimpleNamespace(
+        guild=SimpleNamespace(id=1),
+        author=SimpleNamespace(bot=True, name="Wordle", display_name="Wordle"),
+        channel=SimpleNamespace(id=10, name="wordle"),
+        content="",
+        embeds=[embed],
+        interaction_metadata=SimpleNamespace(user=player),
+        created_at=datetime(2026, 5, 25, tzinfo=timezone.utc),
+        id=58,
+    )
+
+    processed = asyncio.run(cog.process_wordle_result_message(message))
+
+    assert processed is True
+    kwargs = wordle_db.save_result.await_args.kwargs
+    assert kwargs["user_id"] == 111
+    assert kwargs["username"] == "Player"
+    assert kwargs["puzzle"] == 1800
+    assert kwargs["tries"] == 3
+    assert kwargs["hard_mode"] is True
+    assert kwargs["score"] == 2
+    assert kwargs["played_date"] == "2026-05-25"
+    assert kwargs["source"] == "wordle_bot_share"
 
 
 def test_process_wordle_summary_requires_wordle_bot():
