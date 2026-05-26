@@ -13,6 +13,7 @@ conf = load_optional_config()
 COMMAND_GUILD_IDS = get_command_guild_ids(conf)
 
 WORDLE_RESULT_RE = re.compile(r"\bWordle\s+(\d[\d,]*)\s+([1-6X])/6(\*)?", re.IGNORECASE)
+WORDLE_PUZZLE_RE = re.compile(r"\bWordle\s+(\d[\d,]*)\b", re.IGNORECASE)
 WORDLE_SUMMARY_RE = re.compile(r"\b([1-6X])/6(\*)?(?=\s|[:\-–—]|$)\s*(?::|[-–—])?\s*((?:<@!?\d+>[\s,;]*)+)", re.IGNORECASE)
 MENTION_RE = re.compile(r"<@!?(\d+)>")
 
@@ -53,6 +54,33 @@ def can_manage_wordle(member) -> bool:
 
 def is_wordle_channel(channel) -> bool:
     return (getattr(channel, "name", "") or "").lower() == "wordle"
+
+
+def configured_wordle_bot_id():
+    value = conf.get("wordle_bot_id")
+    if value is None:
+        return None
+
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def is_wordle_bot_author(author) -> bool:
+    if not getattr(author, "bot", False):
+        return False
+
+    expected_id = configured_wordle_bot_id()
+    if expected_id is not None:
+        return getattr(author, "id", None) == expected_id
+
+    names = (
+        getattr(author, "name", ""),
+        getattr(author, "display_name", ""),
+        getattr(author, "global_name", ""),
+    )
+    return any("wordle" in (name or "").lower() for name in names)
 
 
 def get_history_bounds(start, end):
@@ -106,6 +134,14 @@ def parse_wordle_result(content: str):
         "hard_mode": hard_mode,
         "score": wordle_score(tries, failed, hard_mode),
     }
+
+
+def parse_wordle_puzzle(content: str):
+    match = WORDLE_PUZZLE_RE.search(content)
+    if not match:
+        return None
+
+    return int(match.group(1).replace(",", ""))
 
 
 def parse_wordle_summary_text(content: str):
@@ -234,8 +270,6 @@ class Wordle(commands.Cog):
         processed = 0
 
         async for message in channel.history(limit=None, after=after, before=before, oldest_first=True):
-            if await self.process_wordle_result_message(message):
-                processed += 1
             processed += await self.process_wordle_summary_message(message)
 
         return processed
@@ -286,50 +320,21 @@ class Wordle(commands.Cog):
         await inter.send(embed=embed)
 
     async def process_wordle_result_message(self, message: nextcord.Message) -> bool:
-        if message.guild is None or message.author.bot:
-            return False
-
-        if not is_wordle_channel(message.channel):
-            return False
-
-        result = parse_wordle_result(message.content)
-        if result is None:
-            return False
-
-        season = await self.bot.db.wordle.get_active_season(message.guild.id)
-        if not season:
-            return False
-
-        played_date = get_message_date(message).isoformat()
-        if not date_in_season(played_date, season):
-            return False
-
-        await self.bot.db.wordle.save_result(
-            guild_id=message.guild.id,
-            channel_id=message.channel.id,
-            user_id=message.author.id,
-            username=message.author.display_name,
-            puzzle=result["puzzle"],
-            tries=result["tries"],
-            failed=result["failed"],
-            hard_mode=result["hard_mode"],
-            score=result["score"],
-            played_date=played_date,
-            message_id=message.id,
-            season_start=season["start_date"],
-            season_end=season["end_date"],
-            source="user_share",
-        )
-        return True
+        # Only the Wordle bot's daily summary should update the leaderboard.
+        # Member share messages are easy to spoof and can use the wrong puzzle.
+        return False
 
     async def process_wordle_summary_message(self, message: nextcord.Message) -> int:
-        if message.guild is None or not message.author.bot:
+        if message.guild is None or not is_wordle_bot_author(message.author):
             return 0
 
         if not is_wordle_channel(message.channel):
             return 0
 
         text = get_message_text(message)
+        if not is_wordle_summary_message(text):
+            return 0
+
         entries = parse_wordle_summary_text(text)
 
         if not entries:
@@ -345,6 +350,7 @@ class Wordle(commands.Cog):
             return 0
 
         count = 0
+        puzzle = parse_wordle_puzzle(text)
         for entry in entries:
             username = await self.resolve_username(message.guild, entry["user_id"])
 
@@ -353,7 +359,7 @@ class Wordle(commands.Cog):
                 channel_id=message.channel.id,
                 user_id=entry["user_id"],
                 username=username,
-                puzzle=None,
+                puzzle=puzzle,
                 tries=entry["tries"],
                 failed=entry["failed"],
                 hard_mode=entry["hard_mode"],
@@ -382,11 +388,6 @@ class Wordle(commands.Cog):
             return
 
         processed = await self.process_wordle_summary_message(message)
-        async for recent_message in message.channel.history(limit=100):
-            if get_message_date(recent_message).isoformat() != played_date:
-                continue
-            if await self.process_wordle_result_message(recent_message):
-                processed += 1
 
         if processed == 0:
             return
@@ -408,9 +409,7 @@ class Wordle(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message: nextcord.Message) -> None:
-        await self.process_wordle_result_message(message)
-
-        if message.guild and message.author.bot and is_wordle_channel(message.channel):
+        if message.guild and is_wordle_bot_author(message.author) and is_wordle_channel(message.channel):
             if is_wordle_summary_message(get_message_text(message)):
                 await asyncio.sleep(5)
                 await self.post_leaderboard(message)

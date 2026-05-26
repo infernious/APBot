@@ -242,13 +242,14 @@ def test_wordle_leaderboard_sums_scores_and_sorts_lowest_first():
     assert rows[1]["failures"] == 1
 
 
-def test_wordle_summary_does_not_downgrade_hard_user_share():
+def test_wordle_summary_replaces_user_share_for_same_puzzle():
     db = make_wordle_db()
 
     asyncio.run(db.save_result(1, 10, 111, "Push", 1801, 3, False, True, 2, "2026-05-01", 100, "2026-05-01", "2026-05-31", "user_share"))
-    asyncio.run(db.save_result(1, 10, 111, "Push", None, 3, False, False, 3, "2026-05-01", 101, "2026-05-01", "2026-05-31", "wordle_bot_summary"))
+    asyncio.run(db.save_result(1, 10, 111, "Push", 1801, 4, False, False, 4, "2026-05-01", 101, "2026-05-01", "2026-05-31", "wordle_bot_summary"))
 
     rows = asyncio.run(db.get_leaderboard(1, "2026-05-01", "2026-05-31"))
 
-    assert rows[0]["total_score"] == 2
-    assert rows[0]["hard_games"] == 1
+    assert rows[0]["total_score"] == 4
+    assert rows[0]["hard_games"] == 0
+    assert db.wordle_results.docs[0]["source"] == "wordle_bot_summary"
