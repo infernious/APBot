@@ -118,7 +118,7 @@ class Tags(commands.Cog):
         if tag_data.get("image_url"):
             embed.set_image(url=tag_data["image_url"])
 
-        await inter.send(embed=embed, ephemeral=True)
+        await inter.send(embed=embed, ephemeral=False)
 
     @commands.Cog.listener("on_ready")
     async def tag_on_ready(self) -> None:
