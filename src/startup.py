@@ -9,6 +9,7 @@ DEFAULT_COGS = [
     "cogs.recurrent",
     "cogs.tags",
     "cogs.study",
+    "cogs.helper_dm",
     "cogs.events",
     "cogs.modmail",
     "cogs.special",
