@@ -3,7 +3,7 @@ import copy
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from database_handler import BaseDatabase, WordleDatabase
+from database_handler import BaseDatabase, WordleDatabase, normalize_duration
 from models import Infraction
 
 
@@ -234,6 +234,38 @@ def test_get_user_infractions_recovers_legacy_moderator_id_with_extra_digits():
     infractions = asyncio.run(db.get_user_infractions(5))
 
     assert infractions[0].moderator == 707985260020760628
+
+
+def test_normalize_duration_accepts_legacy_duration_strings():
+    assert normalize_duration("30m") == 1800
+    assert normalize_duration("1h 15m") == 4500
+    assert normalize_duration("0:30:00") == 1800
+    assert normalize_duration("2 days, 3:04:05") == 183845
+
+
+def test_get_user_infractions_normalizes_legacy_mute_duration_fields():
+    db = make_base_db(
+        [
+            {
+                "_id": 1,
+                "user_id": 5,
+                "infraction_points": 0,
+                "infractions": [
+                    {
+                        "type": "mute",
+                        "mute_reason": "Old duration field",
+                        "mute_moderator": "<@999999999999999999>",
+                        "date": datetime(2024, 2, 3, 10, 15, 0),
+                        "mute_duration": "45m",
+                    }
+                ],
+            }
+        ]
+    )
+
+    infractions = asyncio.run(db.get_user_infractions(5))
+
+    assert infractions[0].duration == 2700
 
 
 def test_update_infraction_reason_updates_new_and_legacy_reason_fields():

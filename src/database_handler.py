@@ -17,6 +17,29 @@ from typing import Optional
 import re
 logger = logging.getLogger(__name__)
 DISCORD_EPOCH_MS = 1420070400000
+DURATION_UNITS = {
+    "s": 1,
+    "sec": 1,
+    "secs": 1,
+    "second": 1,
+    "seconds": 1,
+    "m": 60,
+    "min": 60,
+    "mins": 60,
+    "minute": 60,
+    "minutes": 60,
+    "h": 3600,
+    "hr": 3600,
+    "hrs": 3600,
+    "hour": 3600,
+    "hours": 3600,
+    "d": 86400,
+    "day": 86400,
+    "days": 86400,
+    "w": 604800,
+    "week": 604800,
+    "weeks": 604800,
+}
 
 
 def is_possible_snowflake(value: int) -> bool:
@@ -56,6 +79,80 @@ def first_snowflake(value):
 
                 if is_possible_snowflake(candidate):
                     return candidate
+
+    return None
+
+
+def parse_duration_string(value: str) -> Optional[int]:
+    text = value.strip().lower()
+
+    if not text:
+        return None
+
+    if text.isdigit():
+        return int(text)
+
+    time_parts = text.split(":")
+    if 2 <= len(time_parts) <= 3 and all(part.isdigit() for part in time_parts):
+        numbers = [int(part) for part in time_parts]
+
+        if len(numbers) == 2:
+            minutes, seconds = numbers
+            return minutes * 60 + seconds
+
+        hours, minutes, seconds = numbers
+        return hours * 3600 + minutes * 60 + seconds
+
+    day_prefix = 0
+    day_match = re.match(r"^(\d+)\s+days?,\s*(.+)$", text)
+
+    if day_match:
+        day_prefix = int(day_match.group(1)) * 86400
+        text = day_match.group(2)
+        time_duration = parse_duration_string(text)
+        return day_prefix + time_duration if time_duration is not None else None
+
+    matches = list(
+        re.finditer(
+            r"(\d+(?:\.\d+)?)\s*(weeks?|w|days?|d|hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)",
+            text,
+        )
+    )
+
+    if not matches:
+        return None
+
+    leftovers = re.sub(
+        r"(\d+(?:\.\d+)?)\s*(weeks?|w|days?|d|hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)",
+        "",
+        text,
+    )
+    leftovers = re.sub(r"[\s,;:+-]", "", leftovers)
+
+    if leftovers:
+        return None
+
+    total = 0
+
+    for match in matches:
+        amount, unit = match.groups()
+        total += float(amount) * DURATION_UNITS[unit]
+
+    return int(total)
+
+
+def normalize_duration(value) -> Optional[int]:
+    if value is None:
+        return None
+
+    if isinstance(value, timedelta):
+        return int(value.total_seconds())
+
+    if isinstance(value, (int, float)):
+        return int(value)
+
+    if isinstance(value, str):
+        return parse_duration_string(value)
 
     return None
 
@@ -276,7 +373,18 @@ class BaseDatabase(metaclass=SingletonMeta):
                 "reason": first_value(inf.get("reason"), inf.get("mute_reason"), "No reason provided"),
                 "moderator": normalize_moderator(first_value(inf.get("moderator"), inf.get("mute_moderator"), 0)),
                 "actiontime": normalize_time(first_value(inf.get("actiontime"), inf.get("date"))),
-                "duration": inf.get("duration"),
+                "duration": normalize_duration(
+                    first_value(
+                        inf.get("duration"),
+                        inf.get("mute_duration"),
+                        inf.get("mute_length"),
+                        inf.get("mute_time"),
+                        inf.get("duration_seconds"),
+                        inf.get("mute_duration_seconds"),
+                        inf.get("length"),
+                        inf.get("time"),
+                    )
+                ),
                 "attachment_url": first_value(inf.get("attachment_url"), inf.get("attachment")),
                 "update": inf.get("update") or [],
             }
