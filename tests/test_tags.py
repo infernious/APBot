@@ -2,7 +2,7 @@ import asyncio
 import copy
 from types import SimpleNamespace
 
-from cogs.tags import can_upload_tag_image, is_image_attachment, normalize_tag_name
+from cogs.tags import Tags, can_upload_tag_image, is_image_attachment, normalize_tag_name
 from database_handler import TagsDatabase
 
 
@@ -123,3 +123,36 @@ def test_tags_database_update_is_user_scoped():
     assert my_tag["content"] == "updated"
     assert my_tag["image_url"] == "https://example.com/new.png"
     assert their_tag["content"] == "theirs"
+
+
+def test_tag_display_success_is_public():
+    sent_messages = []
+
+    class FakeTagStore:
+        async def get_tag(self, guild_id, user_id, name):
+            assert guild_id == 1
+            assert user_id == 10
+            assert name == "kinetics"
+            return {
+                "name": "kinetics",
+                "content": "Stuff",
+                "image_url": "https://example.com/kinetics.png",
+            }
+
+    class FakeInteraction:
+        guild = SimpleNamespace(id=1)
+        user = SimpleNamespace(id=10)
+
+        async def send(self, *args, **kwargs):
+            sent_messages.append((args, kwargs))
+
+    bot = SimpleNamespace(db=SimpleNamespace(tags=FakeTagStore()))
+    cog = Tags(bot)
+
+    asyncio.run(Tags.tag_display.callback(cog, FakeInteraction(), name="Kinetics"))
+
+    assert len(sent_messages) == 1
+    _, kwargs = sent_messages[0]
+    assert kwargs["ephemeral"] is False
+    assert kwargs["embed"].title == "kinetics"
+    assert kwargs["embed"].description == "Stuff"
