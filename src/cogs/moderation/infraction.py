@@ -1,6 +1,6 @@
-import nextcord
 import re
-from nextcord import slash_command, Permissions, Interaction, User, Embed, Member, TextChannel, Object, Color, SlashOption, SlashOption, SlashOption
+import nextcord
+from nextcord import slash_command, Permissions, Interaction, Embed, Member, TextChannel, Color, SlashOption
 from nextcord.ext import commands
 from typing import Optional
 from bot_base import APBot
@@ -11,6 +11,12 @@ from datetime import timezone
 conf = load_optional_config()
 COMMAND_GUILD_IDS = get_command_guild_ids(conf)
 DISCORD_EPOCH_MS = 1420070400000
+IMAGE_URL_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp")
+
+
+def clip_text(value, limit: int = 1000) -> str:
+    text = str(value or "")
+    return text if len(text) <= limit else f"{text[:limit - 3]}..."
 
 
 def is_possible_snowflake(value: int) -> bool:
@@ -93,6 +99,71 @@ def format_update_date(value):
     return f"<t:{int(dt.timestamp())}:R>"
 
 
+def format_action_name(actiontype: str) -> str:
+    action = actiontype or "unknown"
+
+    if action == "note":
+        return "Internal Note"
+
+    return action.replace("-", " ").title()
+
+
+def format_duration(value) -> Optional[str]:
+    if not value:
+        return None
+
+    try:
+        duration_seconds = int(value.total_seconds()) if isinstance(value, timedelta) else int(value)
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+    if duration_seconds <= 0:
+        return None
+
+    days, rem = divmod(duration_seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, seconds = divmod(rem, 60)
+
+    parts = []
+    if days:
+        parts.append(f"{days}d")
+    if hours:
+        parts.append(f"{hours}h")
+    if minutes:
+        parts.append(f"{minutes}m")
+    if seconds:
+        parts.append(f"{seconds}s")
+
+    return " ".join(parts) if parts else "0s"
+
+
+def is_http_url(value) -> bool:
+    return str(value or "").lower().startswith(("http://", "https://"))
+
+
+def can_embed_image(value) -> bool:
+    if not is_http_url(value):
+        return False
+
+    url = str(value).split("?", 1)[0].split("#", 1)[0].lower()
+    return url.endswith(IMAGE_URL_EXTENSIONS)
+
+
+def format_attachment_line(value) -> str:
+    if not value:
+        return ""
+
+    attachment = str(value).strip()
+
+    if not attachment:
+        return ""
+
+    if is_http_url(attachment):
+        return f"Evidence: [View attachment]({attachment})\n"
+
+    return f"Evidence: `{clip_text(attachment, 200)}`\n"
+
+
 def format_infraction_updates(updates):
     if not updates:
         return ""
@@ -110,7 +181,7 @@ def format_infraction_updates(updates):
         moderator = update.get("moderator", "Unknown moderator")
         moderator_id = to_snowflake(moderator)
         moderator_text = f"<@{moderator_id}>" if moderator_id else str(moderator)
-        note = update.get("update") or update.get("note") or "No note provided"
+        note = clip_text(update.get("update") or update.get("note") or "No note provided", 500)
         date_text = format_update_date(update.get("date"))
         lines.append(f"- {note} — {moderator_text}, {date_text}")
 
@@ -247,12 +318,8 @@ class Infraction(commands.Cog):
         total = len(infractions)
 
         for index, inf in enumerate(infractions, start=1):
-            action = (
-                    "Internal Note"
-                    if inf.actiontype == "note"
-                    else (inf.actiontype or "unknown").capitalize().replace("-", " ")
-                )
-            reason = inf.reason or "No reason provided"
+            action = format_action_name(inf.actiontype)
+            reason = clip_text(inf.reason or "No reason provided", 1400)
 
             raw_mod = getattr(inf, "moderator", None)
             mod, moderator_id = await self.resolve_moderator(inter.guild, raw_mod)
@@ -277,32 +344,10 @@ class Infraction(commands.Cog):
             unix = int(time_val.timestamp())
             timestamp = f"<t:{unix}:F> (<t:{unix}:R>)"
 
-
-            # ---- Duration ----
-            duration_line = ""
-            if getattr(inf, "duration", None):
-                try:
-                    dur = inf.duration
-                    duration_seconds = int(dur.total_seconds()) if isinstance(dur, timedelta) else int(dur)
-
-                    days, rem = divmod(duration_seconds, 86400)
-                    hours, rem = divmod(rem, 3600)
-                    minutes, seconds = divmod(rem, 60)
-
-                    parts = []
-                    if days:
-                        parts.append(f"{days}d")
-                    if hours:
-                        parts.append(f"{hours}h")
-                    if minutes:
-                        parts.append(f"{minutes}m")
-                    if seconds:
-                        parts.append(f"{seconds}s")
-
-                    duration_line = f"Duration: {' '.join(parts) if parts else '0s'}\n"
-                except (ValueError, TypeError, AttributeError):
-                    pass
-
+            duration = format_duration(getattr(inf, "duration", None))
+            duration_line = f"Duration: {duration}\n" if duration else ""
+            attachment_url = getattr(inf, "attachment_url", None)
+            attachment_line = format_attachment_line(attachment_url)
             update_line = format_infraction_updates(getattr(inf, "update", []))
             embed = Embed(
                 title=f"#{index} - {action}",
@@ -310,6 +355,7 @@ class Infraction(commands.Cog):
                     f"Index: {index}\n"
                     f"Reason: {reason}\n"
                     f"{duration_line}"
+                    f"{attachment_line}"
                     f"Responsible Mod: {mod_line}\n"
                     f"{update_line}"
                     f"{index}/{total} infractions • {timestamp}"
@@ -317,6 +363,8 @@ class Infraction(commands.Cog):
                 color=color_map.get(getattr(inf, "actiontype", ""), Color.gold()),
             )
 
+            if can_embed_image(attachment_url):
+                embed.set_image(url=attachment_url)
 
             await inter.channel.send(embed=embed)
 

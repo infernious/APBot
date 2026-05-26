@@ -40,6 +40,7 @@ DURATION_UNITS = {
     "week": 604800,
     "weeks": 604800,
 }
+MAX_TIMEOUT_DURATION_SECONDS = 28 * 86400
 
 
 def is_possible_snowflake(value: int) -> bool:
@@ -80,6 +81,13 @@ def first_snowflake(value):
                 if is_possible_snowflake(candidate):
                     return candidate
 
+        for size in range(min(20, len(digits) - 1), 16, -1):
+            for start in range(1, len(digits) - size):
+                candidate = int(digits[start:start + size])
+
+                if is_possible_snowflake(candidate):
+                    return candidate
+
     return None
 
 
@@ -90,7 +98,8 @@ def parse_duration_string(value: str) -> Optional[int]:
         return None
 
     if text.isdigit():
-        return int(text)
+        duration = int(text)
+        return duration if duration > 0 else None
 
     time_parts = text.split(":")
     if 2 <= len(time_parts) <= 3 and all(part.isdigit() for part in time_parts):
@@ -98,10 +107,12 @@ def parse_duration_string(value: str) -> Optional[int]:
 
         if len(numbers) == 2:
             minutes, seconds = numbers
-            return minutes * 60 + seconds
+            duration = minutes * 60 + seconds
+            return duration if duration > 0 else None
 
         hours, minutes, seconds = numbers
-        return hours * 3600 + minutes * 60 + seconds
+        duration = hours * 3600 + minutes * 60 + seconds
+        return duration if duration > 0 else None
 
     day_prefix = 0
     day_match = re.match(r"^(\d+)\s+days?,\s*(.+)$", text)
@@ -138,7 +149,8 @@ def parse_duration_string(value: str) -> Optional[int]:
         amount, unit = match.groups()
         total += float(amount) * DURATION_UNITS[unit]
 
-    return int(total)
+    duration = int(total)
+    return duration if duration > 0 else None
 
 
 def normalize_duration(value) -> Optional[int]:
@@ -146,15 +158,131 @@ def normalize_duration(value) -> Optional[int]:
         return None
 
     if isinstance(value, timedelta):
-        return int(value.total_seconds())
+        duration = int(value.total_seconds())
+        return duration if duration > 0 else None
 
     if isinstance(value, (int, float)):
-        return int(value)
+        duration = int(value)
+
+        if duration <= 0:
+            return None
+
+        if duration > MAX_TIMEOUT_DURATION_SECONDS and duration % 1000 == 0:
+            duration_ms = duration // 1000
+
+            if 0 < duration_ms <= MAX_TIMEOUT_DURATION_SECONDS:
+                return duration_ms
+
+        return duration
 
     if isinstance(value, str):
         return parse_duration_string(value)
 
     return None
+
+
+def normalize_duration_milliseconds(value) -> Optional[int]:
+    if value is None:
+        return None
+
+    if isinstance(value, str) and not value.strip().isdigit():
+        return normalize_duration(value)
+
+    try:
+        duration = int(value)
+    except (TypeError, ValueError):
+        return None
+
+    if duration <= 0:
+        return None
+
+    duration_seconds = duration // 1000
+    return duration_seconds if duration_seconds > 0 else None
+
+
+def normalize_actiontype(value) -> str:
+    action = str(value or "unknown").strip().lower().replace("_", "-")
+    action = re.sub(r"\s+", "-", action)
+
+    aliases = {
+        "wm": "mute",
+        "warn-mute": "mute",
+        "warnmute": "mute",
+        "warning-mute": "mute",
+        "pseudomute": "pseudo-mute",
+        "pseudo-mute": "pseudo-mute",
+        "forceban": "force-ban",
+        "force-ban": "force-ban",
+        "internal-note": "note",
+    }
+
+    return aliases.get(action, action or "unknown")
+
+
+def normalize_attachment(value):
+    if value is None:
+        return None
+
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            normalized = normalize_attachment(item)
+
+            if normalized:
+                return normalized
+
+        return None
+
+    if isinstance(value, dict):
+        return normalize_attachment(
+            value.get("url")
+            or value.get("proxy_url")
+            or value.get("attachment_url")
+            or value.get("filename")
+        )
+
+    text = str(value).strip()
+    return text or None
+
+
+def legacy_unmute_update(infraction: dict):
+    moderator = (
+        infraction.get("unmute_moderator")
+        or infraction.get("unmuted_by")
+        or infraction.get("unmute_mod")
+    )
+    reason = (
+        infraction.get("unmute_reason")
+        or infraction.get("unmuted_reason")
+        or infraction.get("unmute_note")
+    )
+
+    if not moderator and not reason:
+        return None
+
+    return {
+        "moderator": moderator or "Unknown moderator",
+        "update": f"Unmuted: {reason or 'No reason provided'}",
+        "date": (
+            infraction.get("unmute_date")
+            or infraction.get("unmuted_at")
+            or infraction.get("unmute_time")
+            or infraction.get("date")
+            or infraction.get("actiontime")
+        ),
+    }
+
+
+def normalize_updates(value) -> list:
+    if not value:
+        return []
+
+    if isinstance(value, list):
+        return list(value)
+
+    if isinstance(value, tuple):
+        return list(value)
+
+    return [value]
 
 
 
@@ -315,7 +443,7 @@ class BaseDatabase(metaclass=SingletonMeta):
             actiontime = actiontime.astimezone(timezone.utc).isoformat()
 
         infraction = infractions[index - 1]
-        updates = infraction.get("update") or []
+        updates = normalize_updates(infraction.get("update"))
         updates.append({
             "moderator": moderator_id,
             "update": note,
@@ -368,25 +496,49 @@ class BaseDatabase(metaclass=SingletonMeta):
         cleaned_infractions = []
 
         for inf in infractions:
+            updates = normalize_updates(
+                inf.get("update") if inf.get("update") is not None else inf.get("updates")
+            )
+            unmute_update = legacy_unmute_update(inf)
+
+            if unmute_update:
+                updates.append(unmute_update)
+
+            duration = normalize_duration(
+                first_value(
+                    inf.get("duration"),
+                    inf.get("mute_duration"),
+                    inf.get("mute_length"),
+                    inf.get("mute_time"),
+                    inf.get("duration_seconds"),
+                    inf.get("mute_duration_seconds"),
+                    inf.get("length"),
+                )
+            )
+            duration_ms = normalize_duration_milliseconds(
+                first_value(
+                    inf.get("duration_ms"),
+                    inf.get("mute_duration_ms"),
+                    inf.get("length_ms"),
+                )
+            )
+
             cleaned = {
-                "actiontype": first_value(inf.get("actiontype"), inf.get("type"), "unknown"),
+                "actiontype": normalize_actiontype(first_value(inf.get("actiontype"), inf.get("type"), "unknown")),
                 "reason": first_value(inf.get("reason"), inf.get("mute_reason"), "No reason provided"),
                 "moderator": normalize_moderator(first_value(inf.get("moderator"), inf.get("mute_moderator"), 0)),
                 "actiontime": normalize_time(first_value(inf.get("actiontime"), inf.get("date"))),
-                "duration": normalize_duration(
+                "duration": duration if duration is not None else duration_ms,
+                "attachment_url": normalize_attachment(
                     first_value(
-                        inf.get("duration"),
-                        inf.get("mute_duration"),
-                        inf.get("mute_length"),
-                        inf.get("mute_time"),
-                        inf.get("duration_seconds"),
-                        inf.get("mute_duration_seconds"),
-                        inf.get("length"),
-                        inf.get("time"),
+                        inf.get("attachment_url"),
+                        inf.get("attachment"),
+                        inf.get("attachments"),
+                        inf.get("evidence"),
+                        inf.get("image_url"),
                     )
                 ),
-                "attachment_url": first_value(inf.get("attachment_url"), inf.get("attachment")),
-                "update": inf.get("update") or [],
+                "update": updates,
             }
 
             cleaned_infractions.append(Infraction(**cleaned))

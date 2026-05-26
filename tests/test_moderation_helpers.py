@@ -1,10 +1,14 @@
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from cogs.moderation.commands import ModerationCommands
 from cogs.moderation.infraction import Infraction as InfractionCog
+from cogs.moderation.infraction import can_embed_image
+from cogs.moderation.infraction import format_action_name
+from cogs.moderation.infraction import format_attachment_line
+from cogs.moderation.infraction import format_duration
 from cogs.moderation.infraction import format_infraction_updates
 from cogs.moderation.infraction import to_snowflake
 
@@ -73,3 +77,15 @@ def test_format_infraction_updates_shows_note_moderator_and_date():
     assert "Notes:" in text
     assert "extra context" in text
     assert "<@123456789012345678>" in text
+
+
+def test_warning_display_helpers_format_legacy_details():
+    assert format_action_name("force-ban") == "Force Ban"
+    assert format_action_name("note") == "Internal Note"
+    assert format_duration(timedelta(hours=1, minutes=30)) == "1h 30m"
+    assert format_duration(0) is None
+    assert format_attachment_line("https://example.com/evidence.png") == (
+        "Evidence: [View attachment](https://example.com/evidence.png)\n"
+    )
+    assert can_embed_image("https://example.com/evidence.png?size=1024") is True
+    assert can_embed_image("https://example.com/evidence.txt") is False

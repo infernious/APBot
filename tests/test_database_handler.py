@@ -1,6 +1,6 @@
 import asyncio
 import copy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from database_handler import BaseDatabase, WordleDatabase, normalize_duration
@@ -241,6 +241,13 @@ def test_normalize_duration_accepts_legacy_duration_strings():
     assert normalize_duration("1h 15m") == 4500
     assert normalize_duration("0:30:00") == 1800
     assert normalize_duration("2 days, 3:04:05") == 183845
+    assert normalize_duration("0") is None
+
+
+def test_normalize_duration_accepts_large_legacy_millisecond_values():
+    assert normalize_duration(3600000) == 3600
+    assert normalize_duration(timedelta(minutes=10)) == 600
+    assert normalize_duration(timedelta(seconds=0)) is None
 
 
 def test_get_user_infractions_normalizes_legacy_mute_duration_fields():
@@ -266,6 +273,89 @@ def test_get_user_infractions_normalizes_legacy_mute_duration_fields():
     infractions = asyncio.run(db.get_user_infractions(5))
 
     assert infractions[0].duration == 2700
+
+
+def test_get_user_infractions_does_not_treat_time_as_duration():
+    db = make_base_db(
+        [
+            {
+                "_id": 1,
+                "user_id": 5,
+                "infraction_points": 0,
+                "infractions": [
+                    {
+                        "type": "mute",
+                        "mute_reason": "timestamp field",
+                        "date": datetime(2024, 2, 3, 10, 15, 0),
+                        "time": 1800,
+                    }
+                ],
+            }
+        ]
+    )
+
+    infractions = asyncio.run(db.get_user_infractions(5))
+
+    assert infractions[0].duration is None
+
+
+def test_get_user_infractions_normalizes_legacy_aliases_attachments_and_unmute_notes():
+    db = make_base_db(
+        [
+            {
+                "_id": 1,
+                "user_id": 5,
+                "infraction_points": 0,
+                "infractions": [
+                    {
+                        "type": "wm",
+                        "mute_reason": "legacy mute",
+                        "mute_moderator": "1002335003411222638140",
+                        "date": datetime(2024, 4, 12, 12, 8, 0),
+                        "mute_duration_ms": 1800000,
+                        "attachments": [{"url": "https://example.com/evidence.png"}],
+                        "update": {
+                            "moderator": "<@123456789012345678>",
+                            "update": "older context",
+                            "date": "2024-04-12T12:30:00+00:00",
+                        },
+                        "unmute_moderator": "<@123456789012345678>",
+                        "unmute_reason": "appeal accepted",
+                        "unmute_date": "2024-04-12T13:08:00+00:00",
+                    },
+                    {
+                        "type": "forceban",
+                        "reason": "legacy ban",
+                        "moderator": "687432678571458912718280",
+                        "date": datetime(2024, 4, 13, 12, 8, 0),
+                        "image_url": "https://example.com/ban.jpg",
+                    },
+                ],
+            }
+        ]
+    )
+
+    infractions = asyncio.run(db.get_user_infractions(5))
+
+    assert infractions[0].actiontype == "mute"
+    assert infractions[0].moderator == 1002335003411222638
+    assert infractions[0].duration == 1800
+    assert infractions[0].attachment_url == "https://example.com/evidence.png"
+    assert infractions[0].update == [
+        {
+            "moderator": "<@123456789012345678>",
+            "update": "older context",
+            "date": "2024-04-12T12:30:00+00:00",
+        },
+        {
+            "moderator": "<@123456789012345678>",
+            "update": "Unmuted: appeal accepted",
+            "date": "2024-04-12T13:08:00+00:00",
+        }
+    ]
+    assert infractions[1].actiontype == "force-ban"
+    assert infractions[1].moderator == 687432678571458912
+    assert infractions[1].attachment_url == "https://example.com/ban.jpg"
 
 
 def test_update_infraction_reason_updates_new_and_legacy_reason_fields():
@@ -304,6 +394,35 @@ def test_add_infraction_note_appends_update_entry():
     assert stored["infractions"][0]["update"][0]["moderator"] == 999
     assert stored["infractions"][0]["update"][0]["update"] == "extra context"
     assert stored["infractions"][0]["update"][0]["date"] == "2024-01-02T03:04:05+00:00"
+
+
+def test_add_infraction_note_preserves_single_legacy_update_entry():
+    db = make_base_db([
+        {
+            "_id": 1,
+            "user_id": 5,
+            "infraction_points": 0,
+            "infractions": [
+                {
+                    "actiontype": "warn",
+                    "reason": "old",
+                    "update": {
+                        "moderator": 111,
+                        "update": "existing context",
+                        "date": "2024-01-01T00:00:00+00:00",
+                    },
+                }
+            ],
+        }
+    ])
+    date = datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+
+    result = asyncio.run(db.add_infraction_note(5, 1, 999, "extra context", date))
+    stored = asyncio.run(db.read_user_config(5))
+
+    assert result is True
+    assert stored["infractions"][0]["update"][0]["update"] == "existing context"
+    assert stored["infractions"][0]["update"][1]["update"] == "extra context"
 
 
 def test_delete_infraction_removes_only_selected_index():
