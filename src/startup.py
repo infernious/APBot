@@ -8,6 +8,7 @@ DEFAULT_COGS = [
     "cogs.bonk",
     "cogs.recurrent",
     "cogs.tags",
+    "cogs.wordle",
     "cogs.study",
     "cogs.helper_dm",
     "cogs.events",
