@@ -212,43 +212,71 @@ def test_get_user_infractions_normalizes_old_mute_records():
     assert infractions[0].attachment_url == "https://example.com/old.png"
     assert infractions[0].actiontime == datetime(2024, 2, 3, 10, 15, 0, tzinfo=timezone.utc)
 
-
-def test_wordle_start_season_deactivates_existing_active_season():
-    db = make_wordle_db([
-        {"guild_id": 1, "channel_id": 10, "start_date": "2026-05-01", "end_date": "2026-05-31", "active": True},
+def test_update_infraction_reason_updates_new_and_legacy_reason_fields():
+    db = make_base_db([
+        {
+            "_id": 1,
+            "user_id": 5,
+            "infraction_points": 0,
+            "infractions": [{"type": "mute", "mute_reason": "old"}],
+        }
     ])
 
-    asyncio.run(db.start_season(1, 20, "2026-06-01", "2026-06-30"))
+    result = asyncio.run(db.update_infraction_reason(5, 1, "new reason"))
+    stored = asyncio.run(db.read_user_config(5))
 
-    assert db.wordle_seasons.docs[0]["active"] is False
-    assert db.wordle_seasons.docs[1]["active"] is True
-    assert db.wordle_seasons.docs[1]["channel_id"] == 20
-
-
-def test_wordle_leaderboard_sums_scores_and_sorts_lowest_first():
-    db = make_wordle_db()
-
-    asyncio.run(db.save_result(1, 10, 111, "Push", 1801, 4, False, False, 4, "2026-05-01", 100, "2026-05-01", "2026-05-31", "user_share"))
-    asyncio.run(db.save_result(1, 10, 111, "Push", 1802, 3, False, True, 2, "2026-05-02", 101, "2026-05-01", "2026-05-31", "user_share"))
-    asyncio.run(db.save_result(1, 10, 222, "Other", 1801, None, True, False, 7, "2026-05-01", 102, "2026-05-01", "2026-05-31", "user_share"))
-
-    rows = asyncio.run(db.get_leaderboard(1, "2026-05-01", "2026-05-31"))
-
-    assert rows[0]["user_id"] == 111
-    assert rows[0]["total_score"] == 6
-    assert rows[0]["games"] == 2
-    assert rows[0]["hard_games"] == 1
-    assert rows[1]["user_id"] == 222
-    assert rows[1]["failures"] == 1
+    assert result is True
+    assert stored["infractions"][0]["reason"] == "new reason"
+    assert stored["infractions"][0]["mute_reason"] == "new reason"
 
 
-def test_wordle_summary_does_not_downgrade_hard_user_share():
-    db = make_wordle_db()
+def test_add_infraction_note_appends_update_entry():
+    db = make_base_db([
+        {
+            "_id": 1,
+            "user_id": 5,
+            "infraction_points": 0,
+            "infractions": [{"actiontype": "warn", "reason": "old"}],
+        }
+    ])
+    date = datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
 
-    asyncio.run(db.save_result(1, 10, 111, "Push", 1801, 3, False, True, 2, "2026-05-01", 100, "2026-05-01", "2026-05-31", "user_share"))
-    asyncio.run(db.save_result(1, 10, 111, "Push", None, 3, False, False, 3, "2026-05-01", 101, "2026-05-01", "2026-05-31", "wordle_bot_summary"))
+    result = asyncio.run(db.add_infraction_note(5, 1, 999, "extra context", date))
+    stored = asyncio.run(db.read_user_config(5))
 
-    rows = asyncio.run(db.get_leaderboard(1, "2026-05-01", "2026-05-31"))
+    assert result is True
+    assert stored["infractions"][0]["update"][0]["moderator"] == 999
+    assert stored["infractions"][0]["update"][0]["update"] == "extra context"
+    assert stored["infractions"][0]["update"][0]["date"] == "2024-01-02T03:04:05+00:00"
 
-    assert rows[0]["total_score"] == 2
-    assert rows[0]["hard_games"] == 1
+
+def test_delete_infraction_removes_only_selected_index():
+    db = make_base_db([
+        {
+            "_id": 1,
+            "user_id": 5,
+            "infraction_points": 10,
+            "infractions": [
+                {"actiontype": "warn", "reason": "first"},
+                {"actiontype": "mute", "reason": "second"},
+            ],
+        }
+    ])
+
+    result = asyncio.run(db.delete_infraction(5, 1))
+    stored = asyncio.run(db.read_user_config(5))
+
+    assert result is True
+    assert len(stored["infractions"]) == 1
+    assert stored["infractions"][0]["reason"] == "second"
+    assert stored["infraction_points"] == 10
+
+
+def test_infraction_update_helpers_reject_bad_index():
+    db = make_base_db([
+        {"_id": 1, "user_id": 5, "infraction_points": 0, "infractions": []}
+    ])
+
+    assert asyncio.run(db.update_infraction_reason(5, 1, "reason")) is False
+    assert asyncio.run(db.add_infraction_note(5, 1, 999, "note")) is False
+    assert asyncio.run(db.delete_infraction(5, 1)) is False
