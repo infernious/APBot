@@ -3,8 +3,16 @@ import copy
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from database_handler import BaseDatabase
+from database_handler import BaseDatabase, WordleDatabase
 from models import Infraction
+
+
+class FakeCursor:
+    def __init__(self, docs):
+        self.docs = [copy.deepcopy(doc) for doc in docs]
+
+    async def to_list(self, length=None):
+        return copy.deepcopy(self.docs)
 
 
 class FakeCollection:
@@ -42,12 +50,51 @@ class FakeCollection:
 
         return SimpleNamespace(modified_count=0)
 
+    async def update_one(self, query, update, upsert=False):
+        for index, doc in enumerate(self.docs):
+            if self._matches(doc, query):
+                stored = copy.deepcopy(doc)
+                stored.update(copy.deepcopy(update.get("$set", {})))
+                self.docs[index] = stored
+                return SimpleNamespace(modified_count=1, upserted_id=None)
+
+        if upsert:
+            stored = copy.deepcopy(query)
+            stored.update(copy.deepcopy(update.get("$set", {})))
+            stored.setdefault("_id", len(self.docs) + 1)
+            self.docs.append(stored)
+            return SimpleNamespace(modified_count=0, upserted_id=stored["_id"])
+
+        return SimpleNamespace(modified_count=0, upserted_id=None)
+
+    async def update_many(self, query, update):
+        modified_count = 0
+
+        for index, doc in enumerate(self.docs):
+            if self._matches(doc, query):
+                stored = copy.deepcopy(doc)
+                stored.update(copy.deepcopy(update.get("$set", {})))
+                self.docs[index] = stored
+                modified_count += 1
+
+        return SimpleNamespace(modified_count=modified_count)
+
+    def find(self, query):
+        return FakeCursor([doc for doc in self.docs if self._matches(doc, query)])
+
 
 def make_base_db(user_docs=None):
     db = object.__new__(BaseDatabase)
     db.user_config = FakeCollection(user_docs)
     db.bot_config = FakeCollection()
     db.database = {"channel_config": FakeCollection()}
+    return db
+
+
+def make_wordle_db(season_docs=None, result_docs=None):
+    db = object.__new__(WordleDatabase)
+    db.wordle_seasons = FakeCollection(season_docs)
+    db.wordle_results = FakeCollection(result_docs)
     return db
 
 

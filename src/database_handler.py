@@ -757,31 +757,38 @@ class TagsDatabase(BaseDatabase):
     def __init__(self, conf=None):
         super().__init__(conf)
 
-    async def exists(self, guild_id: int, name: str) -> bool:
-        tag = await self.tags.find_one({"guild_id": guild_id, "name": name})
+    async def exists(self, guild_id: int, user_id: int, name: str) -> bool:
+        tag = await self.tags.find_one({"guild_id": guild_id, "user_id": user_id, "name": name})
         return tag is not None
 
-    async def create(self, guild_id: int, user_id: int, name: str, content: str) -> None:
-        tag_dict = await self.tags.find_one({"guild_id": guild_id, "name": name})
-        if tag_dict is None:
-            tag_dict = {"guild_id": guild_id, "user_id": user_id, "name": name, "content": content}
-            await self.tags.insert_one(tag_dict)
-        else:
+    async def create(self, guild_id: int, user_id: int, name: str, content: str, image_url: Optional[str] = None) -> None:
+        tag_dict = await self.tags.find_one({"guild_id": guild_id, "user_id": user_id, "name": name})
+        if tag_dict is not None:
             raise ValueError("Tag with this name already exists.")
 
-    async def delete(self, guild_id: int, name: str) -> None:
-        await self.tags.delete_one({"guild_id": guild_id, "name": name})
+        await self.tags.insert_one({
+            "guild_id": guild_id,
+            "user_id": user_id,
+            "name": name,
+            "content": content,
+            "image_url": image_url,
+        })
 
-    async def update(self, guild_id: int, name: str, new_content: str) -> None:
-        await self.tags.update_one({"guild_id": guild_id, "name": name}, {"$set": {"content": new_content}})
+    async def delete(self, guild_id: int, user_id: int, name: str) -> None:
+        await self.tags.delete_one({"guild_id": guild_id, "user_id": user_id, "name": name})
 
-    async def get_all(self, guild_id: int) -> list:
-        tags = await self.tags.find({"guild_id": guild_id}).to_list(length=None)
-        return tags
+    async def update(self, guild_id: int, user_id: int, name: str, new_content: str, image_url: Optional[str] = None) -> None:
+        await self.tags.update_one(
+            {"guild_id": guild_id, "user_id": user_id, "name": name},
+            {"$set": {"content": new_content, "image_url": image_url}},
+        )
 
-    async def get_tag(self, guild_id: int, name: str) -> Optional[dict]:
-        tag = await self.tags.find_one({"guild_id": guild_id, "name": name})
-        return tag if tag else None
+    async def get_all(self, guild_id: int, user_id: int) -> list:
+        tags = await self.tags.find({"guild_id": guild_id, "user_id": user_id}).to_list(length=None)
+        return sorted(tags, key=lambda tag: tag.get("name", ""))
+
+    async def get_tag(self, guild_id: int, user_id: int, name: str) -> Optional[dict]:
+        return await self.tags.find_one({"guild_id": guild_id, "user_id": user_id, "name": name})
 
     async def clear_all_tags(self) -> None:
         await self.tags.delete_many({})
@@ -789,6 +796,112 @@ class TagsDatabase(BaseDatabase):
     async def remove_user_tags(self, user_id: int) -> None:
         await self.tags.delete_many({"user_id": user_id})
     
+
+
+class WordleDatabase(BaseDatabase):
+    def __init__(self, conf=None):
+        super().__init__(conf)
+        self.wordle_seasons = self.database["wordle_seasons"]
+        self.wordle_results = self.database["wordle_results"]
+
+    async def start_season(self, guild_id: int, channel_id: int, start_date: str, end_date: str) -> None:
+        await self.wordle_seasons.update_many(
+            {"guild_id": guild_id, "active": True},
+            {"$set": {"active": False}},
+        )
+        await self.wordle_seasons.insert_one({
+            "guild_id": guild_id,
+            "channel_id": channel_id,
+            "start_date": start_date,
+            "end_date": end_date,
+            "active": True,
+        })
+
+    async def get_active_season(self, guild_id: int):
+        return await self.wordle_seasons.find_one({"guild_id": guild_id, "active": True})
+
+    async def set_last_summary_message(self, guild_id: int, message_id: int) -> None:
+        await self.wordle_seasons.update_one(
+            {"guild_id": guild_id, "active": True},
+            {"$set": {"last_summary_message_id": message_id}},
+        )
+
+    async def save_result(
+        self,
+        guild_id: int,
+        channel_id: int,
+        user_id: int,
+        username: str,
+        puzzle,
+        tries,
+        failed: bool,
+        hard_mode: bool,
+        score: int,
+        played_date: str,
+        message_id: int,
+        season_start: str,
+        season_end: str,
+        source: str,
+    ) -> None:
+        query = {
+            "guild_id": guild_id,
+            "user_id": user_id,
+            "played_date": played_date,
+            "season_start": season_start,
+            "season_end": season_end,
+        }
+
+        existing = await self.wordle_results.find_one(query)
+        if existing and existing.get("source") == "user_share" and source == "wordle_bot_summary" and not hard_mode:
+            return
+
+        await self.wordle_results.update_one(
+            query,
+            {
+                "$set": {
+                    "channel_id": channel_id,
+                    "username": username,
+                    "puzzle": puzzle,
+                    "tries": tries,
+                    "failed": failed,
+                    "hard_mode": hard_mode,
+                    "score": score,
+                    "played_date": played_date,
+                    "message_id": message_id,
+                    "season_start": season_start,
+                    "season_end": season_end,
+                    "source": source,
+                }
+            },
+            upsert=True,
+        )
+
+    async def get_leaderboard(self, guild_id: int, start_date: str, end_date: str) -> list:
+        docs = await self.wordle_results.find({
+            "guild_id": guild_id,
+            "season_start": start_date,
+            "season_end": end_date,
+        }).to_list(length=None)
+
+        users = {}
+        for doc in docs:
+            user_id = doc["user_id"]
+            users.setdefault(user_id, {
+                "user_id": user_id,
+                "username": doc.get("username", str(user_id)),
+                "total_score": 0,
+                "games": 0,
+                "hard_games": 0,
+                "failures": 0,
+            })
+            users[user_id]["total_score"] += int(doc.get("score", 0))
+            users[user_id]["games"] += 1
+            users[user_id]["hard_games"] += 1 if doc.get("hard_mode") else 0
+            users[user_id]["failures"] += 1 if doc.get("failed") else 0
+
+        return sorted(users.values(), key=lambda row: (row["total_score"], -row["games"], row["username"].lower()))
+
+
 class RecurrentDatabase(BaseDatabase):
 
     def __init__(self, conf=None):
@@ -867,5 +980,6 @@ class Database:
         self.appeal: AppealDatabase = AppealDatabase()
         self.recurrent: RecurrentDatabase = RecurrentDatabase()
         self.tags: TagsDatabase = TagsDatabase() 
+        self.wordle: WordleDatabase = WordleDatabase()
         self.config_lock = asyncio.Lock()
         self.config_data = {} 
