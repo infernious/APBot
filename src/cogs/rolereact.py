@@ -1008,6 +1008,75 @@ class LoungeThree(nextcord.ui.View):
             await member.add_roles(role)
             await interaction.response.send_message(f"`{role.name}` role added!", ephemeral=True)
 
+class Region(nextcord.ui.View):
+    def __init__(self, bot):
+        super().__init__(timeout=None)
+        self.bot = bot
+
+    REGION_ROLES = [
+        "Region: North America",
+        "Region: South America",
+        "Region: Europe",
+        "Region: Africa",
+        "Region: Asia",
+        "Region: Oceania",
+        "Region: Prefer Not to Say",
+    ]
+
+    async def toggle_region(self, interaction: nextcord.Interaction, role_name: str):
+        member = interaction.guild.get_member(interaction.user.id)
+        if member is None:
+            await interaction.response.send_message("Member not found in this guild.", ephemeral=True)
+            return
+
+        role = nextcord.utils.get(interaction.guild.roles, name=role_name)
+        if role is None:
+            await interaction.response.send_message(f"`{role_name}` role not found.", ephemeral=True)
+            return
+
+        # If they already have it, remove it
+        if role in member.roles:
+            await member.remove_roles(role)
+            await interaction.response.send_message(f"`{role.name}` role removed!", ephemeral=True)
+            return
+
+        # Remove any other region role first, so they only have one
+        for region_role_name in self.REGION_ROLES:
+            region_role = nextcord.utils.get(interaction.guild.roles, name=region_role_name)
+            if region_role and region_role in member.roles:
+                await member.remove_roles(region_role)
+
+        await member.add_roles(role)
+        await interaction.response.send_message(f"`{role.name}` role added!", ephemeral=True)
+
+    @nextcord.ui.button(label="North America", style=nextcord.ButtonStyle.grey, custom_id="region_north_america", emoji="🌎", row=0)
+    async def north_america(self, button: nextcord.ui.Button, interaction: nextcord.Interaction):
+        await self.toggle_region(interaction, "Region: North America")
+
+    @nextcord.ui.button(label="South America", style=nextcord.ButtonStyle.grey, custom_id="region_south_america", emoji="🌎", row=0)
+    async def south_america(self, button: nextcord.ui.Button, interaction: nextcord.Interaction):
+        await self.toggle_region(interaction, "Region: South America")
+
+    @nextcord.ui.button(label="Europe", style=nextcord.ButtonStyle.grey, custom_id="region_europe", emoji="🌍", row=0)
+    async def europe(self, button: nextcord.ui.Button, interaction: nextcord.Interaction):
+        await self.toggle_region(interaction, "Region: Europe")
+
+    @nextcord.ui.button(label="Africa", style=nextcord.ButtonStyle.grey, custom_id="region_africa", emoji="🌍", row=1)
+    async def africa(self, button: nextcord.ui.Button, interaction: nextcord.Interaction):
+        await self.toggle_region(interaction, "Region: Africa")
+
+    @nextcord.ui.button(label="Asia", style=nextcord.ButtonStyle.grey, custom_id="region_asia", emoji="🌏", row=1)
+    async def asia(self, button: nextcord.ui.Button, interaction: nextcord.Interaction):
+        await self.toggle_region(interaction, "Region: Asia")
+
+    @nextcord.ui.button(label="Oceania", style=nextcord.ButtonStyle.grey, custom_id="region_oceania", emoji="🌊", row=1)
+    async def oceania(self, button: nextcord.ui.Button, interaction: nextcord.Interaction):
+        await self.toggle_region(interaction, "Region: Oceania")
+
+    @nextcord.ui.button(label="Prefer Not to Say", style=nextcord.ButtonStyle.grey, custom_id="region_prefer_not_to_say", emoji="❔", row=2)
+    async def prefer_not_to_say(self, button: nextcord.ui.Button, interaction: nextcord.Interaction):
+        await self.toggle_region(interaction, "Region: Prefer Not to Say")
+
 
 class RoleReact(commands.Cog):
     """Role React (3 commands only)"""
@@ -1098,6 +1167,25 @@ class RoleReact(commands.Cog):
             "https://media.discordapp.net/attachments/791130847461507093/1391476764072611962/image.png?ex=686c0938&is=686ab7b8&hm=1b2ee60ac99963457ce7888d2680298cefef72616c79090f130b8bc9ebc8969b&=&width=1458&height=868",
             LoungeThree(self.bot))
 
+    @slash_command(name="region-signup", description="Post region role signup panel", guild_ids=[conf.get("guild_id")])
+    @application_checks.has_any_role(*ALLOWED_ROLES)
+    async def region_signup(self, interaction: Interaction):
+        await interaction.response.defer()
+
+        desc = (
+            "Select the region/continent that best describes where you are from.\n"
+            "Click again to remove the role. Choosing a new region will replace your old region role."
+        )
+
+        await self._post_panel(
+            interaction,
+            "Choose Your Region",
+            desc,
+            nextcord.Color.teal(),
+            "https://cdn.discordapp.com/attachments/791130847461507093/1513701561061347459/image.png?ex=6a28afef&is=6a275e6f&hm=f39e5e6f0b96ed98a22e6bcc52a333bf9956e79930a8cfaae20f3f3e9a77d8dd&",
+            Region(self.bot)
+        )
+
 
 
 
@@ -1118,3 +1206,5 @@ def setup(bot):
     bot.add_view(LoungeOne(bot))
     bot.add_view(LoungeTwo(bot))
     bot.add_view(LoungeThree(bot))
+
+    bot.add_view(Region(bot))
