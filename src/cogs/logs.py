@@ -1,5 +1,11 @@
 import nextcord
 from nextcord.ext import commands
+from nextcord.ext.application_checks import (
+    ApplicationCheckFailure,
+    ApplicationMissingAnyRole,
+    ApplicationMissingPermissions,
+    ApplicationMissingRole,
+)
 import traceback
 import sys
 import json
@@ -14,6 +20,13 @@ original_stderr = sys.stderr
 
 # Avoid multiple logging instances
 already_redirected = False
+
+IGNORED_APPLICATION_ERRORS = (
+    ApplicationCheckFailure,
+    ApplicationMissingAnyRole,
+    ApplicationMissingPermissions,
+    ApplicationMissingRole,
+)
 
 
 class StreamToDiscord(io.StringIO):
@@ -121,6 +134,21 @@ class Logs(commands.Cog):
 
     @commands.Cog.listener()
     async def on_application_command_error(self, interaction: nextcord.Interaction, error: Exception):
+        original_error = getattr(error, "original", error)
+        if isinstance(original_error, IGNORED_APPLICATION_ERRORS):
+            try:
+                await interaction.response.send_message(
+                    "You do not have permission to use this command.", ephemeral=True
+                )
+            except nextcord.errors.InteractionResponded:
+                try:
+                    await interaction.followup.send(
+                        "You do not have permission to use this command.", ephemeral=True
+                    )
+                except Exception:
+                    pass
+            return
+
         error_msg = "".join(traceback.format_exception(type(error), error, error.__traceback__))
 
         try:

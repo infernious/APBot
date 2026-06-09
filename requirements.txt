@@ -4,3 +4,5 @@ motor
 jishaku==2.4.0
 python-dotenv
 pytest
+nudenet>=3.4.2
+rapidocr-onnxruntime>=1.4.4

@@ -16,6 +16,11 @@
     1,
     1
   ],
+  "application_id": 1,
+  "scam_detector_enabled_bot_ids": [
+    1
+  ],
+  "scam_detector_forward_channel_id": 1,
   "command_prefix": "!!",
   "project_root": "APBot",
   "colors": {
