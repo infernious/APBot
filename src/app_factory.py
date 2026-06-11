@@ -40,10 +40,14 @@ def register_ready_event(bot: APBot) -> None:
 
 
 def build_bot(conf) -> APBot:
+    intents = Intents.default()
+    intents.members = True
+    intents.message_content = True
+
     bot: APBot = APBot(
         command_prefix=conf.get("command_prefix", "ap:"),
         strip_after_prefix=True,
-        intents=Intents.all(),
+        intents=intents,
         activity=Activity(type=ActivityType.playing, name="DM me to contact mods!"),
     )
 
