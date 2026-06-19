@@ -9,6 +9,7 @@ DEFAULT_COGS = [
     "cogs.recurrent",
     "cogs.tags",
     "cogs.wordle",
+    "cogs.scam_image_detector",
     "cogs.study",
     "cogs.helper_dm",
     "cogs.events",
