@@ -149,11 +149,13 @@ def test_unsafe_message_from_any_channel_forwards_to_review_channel():
     assert review_channel.send.await_args.kwargs["content"] == "<@920819377627099166>"
 
 
-def test_safe_message_is_not_forwarded():
+def test_safe_message_is_forwarded_without_alert_ping():
     bot, review_channel = make_bot()
     cog = ScamImageDetector(bot)
     cog.assess_message = AsyncMock(return_value=(None, []))
 
     asyncio.run(cog.handle_message(make_message(channel_id=999)))
 
-    review_channel.send.assert_not_awaited()
+    review_channel.send.assert_awaited_once()
+    assert review_channel.send.await_args.kwargs["content"] is None
+    assert review_channel.send.await_args.kwargs["embed"].title == "Server Message"
