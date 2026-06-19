@@ -135,6 +135,17 @@ def test_trusted_role_does_not_scan():
     review_channel.send.assert_not_awaited()
 
 
+def test_review_channel_messages_are_not_scanned_or_forwarded():
+    bot, review_channel = make_bot()
+    cog = ScamImageDetector(bot)
+    cog.assess_message = AsyncMock(return_value=(dangerous_assessment(), []))
+
+    asyncio.run(cog.handle_message(make_message(channel_id=REVIEW_CHANNEL_ID)))
+
+    cog.assess_message.assert_not_awaited()
+    review_channel.send.assert_not_awaited()
+
+
 def test_unsafe_message_from_any_channel_forwards_to_review_channel():
     bot, review_channel = make_bot()
     cog = ScamImageDetector(bot)

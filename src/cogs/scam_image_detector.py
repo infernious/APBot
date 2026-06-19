@@ -1529,6 +1529,9 @@ class ScamImageDetector(commands.Cog):
         if getattr(message, "guild", None) is None:
             return
 
+        if getattr(getattr(message, "channel", None), "id", None) == REVIEW_CHANNEL_ID:
+            return
+
         author = getattr(message, "author", None)
         if getattr(author, "bot", False):
             return
@@ -1580,6 +1583,9 @@ class ScamImageDetector(commands.Cog):
     async def on_raw_message_edit(self, payload: nextcord.RawMessageUpdateEvent) -> None:
         try:
             if not self.is_enabled_for_current_bot():
+                return
+
+            if payload.channel_id == REVIEW_CHANNEL_ID:
                 return
 
             await asyncio.sleep(1)
