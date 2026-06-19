@@ -62,8 +62,6 @@ def _env_ids(name: str, default: set) -> set:
     return parsed or set(default)
 
 
-ALERT_USER_ID = _env_int("ALERT_USER_ID", 920819377627099166)
-ALERT_MESSAGE = f"<@{ALERT_USER_ID}>"
 TARGET_APPLICATION_ID = 1508281890820460604
 REVIEW_CHANNEL_ID = 1508284501485162541
 MODERATION_BYPASS_ROLE_IDS = _env_ids(
@@ -1557,6 +1555,9 @@ class ScamImageDetector(commands.Cog):
                 log.warning("scan timed out for message %s", message_id)
                 assessment = None
 
+            if assessment is None:
+                return
+
             review_channel = await self.get_review_channel()
             if review_channel is None:
                 log.warning("review channel %s is unavailable", REVIEW_CHANNEL_ID)
@@ -1564,9 +1565,9 @@ class ScamImageDetector(commands.Cog):
 
             try:
                 await review_channel.send(
-                    content=ALERT_MESSAGE if assessment is not None else None,
+                    content=None,
                     embed=self.build_review_embed(message, assessment, forwarded_sources),
-                    allowed_mentions=nextcord.AllowedMentions(users=True, roles=False, everyone=False),
+                    allowed_mentions=nextcord.AllowedMentions.none(),
                 )
             except (nextcord.Forbidden, nextcord.HTTPException):
                 pass
