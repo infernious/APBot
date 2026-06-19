@@ -6,7 +6,6 @@ import os
 import re
 import subprocess
 import tempfile
-from collections import OrderedDict
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -63,8 +62,6 @@ def _env_ids(name: str, default: set) -> set:
     return parsed or set(default)
 
 
-ALERT_USER_ID = _env_int("ALERT_USER_ID", 920819377627099166)
-ALERT_MESSAGE = f"<@{ALERT_USER_ID}>"
 TARGET_APPLICATION_ID = 1508281890820460604
 REVIEW_CHANNEL_ID = 1508284501485162541
 MODERATION_BYPASS_ROLE_IDS = _env_ids(
@@ -106,7 +103,6 @@ ALERT_THRESHOLD = _env_int("ALERT_THRESHOLD", 70)
 
 SCAN_CONCURRENCY = max(1, _env_int("SCAN_CONCURRENCY", 2))
 SCAN_TIMEOUT_SECONDS = _env_int("SCAN_TIMEOUT_SECONDS", 60)
-MAX_ALERTED_IDS = _env_int("MAX_ALERTED_IDS", 5000)
 DOWNLOAD_CHUNK_BYTES = 64 * 1024
 HTTP_TIMEOUT_SECONDS = _env_int("HTTP_TIMEOUT_SECONDS", 20)
 
@@ -1205,16 +1201,8 @@ def assess_media_bytes(
 class ScamImageDetector(commands.Cog):
     def __init__(self, bot: APBot) -> None:
         self.bot = bot
-        self.alerted_message_ids: "OrderedDict[int, None]" = OrderedDict()
         self._processing_ids: set = set()
         self._scan_semaphore = asyncio.Semaphore(SCAN_CONCURRENCY)
-
-    def _mark_alerted(self, message_id: Optional[int]) -> None:
-        if message_id is None:
-            return
-        self.alerted_message_ids[message_id] = None
-        while len(self.alerted_message_ids) > MAX_ALERTED_IDS:
-            self.alerted_message_ids.popitem(last=False)
 
     def is_enabled_for_current_bot(self) -> bool:
         bot_user_id = getattr(getattr(self.bot, "user", None), "id", None)
@@ -1461,10 +1449,10 @@ class ScamImageDetector(commands.Cog):
             return None, forwarded_sources
         return max(alert_assessments, key=lambda assessment: assessment.score), forwarded_sources
 
-    def build_alert_embed(
+    def build_review_embed(
         self,
         message: nextcord.Message,
-        assessment: ScamAssessment,
+        assessment: Optional[ScamAssessment],
         forwarded_sources: Iterable[ForwardedSource] = (),
     ) -> nextcord.Embed:
         original_content = getattr(message, "content", "") or ""
@@ -1475,17 +1463,25 @@ class ScamImageDetector(commands.Cog):
         author_mention = getattr(author, "mention", str(author_id))
         channel_mention = getattr(getattr(message, "channel", None), "mention", "unknown channel")
 
+        unsafe = assessment is not None
+        title = "Possible Unsafe Message Detected" if unsafe else "Server Message"
+        if is_forwarded:
+            title = f"Forwarded {title}"
+
         embed = nextcord.Embed(
-            title="Possible Unsafe Forwarded Message Detected"
-            if is_forwarded
-            else "Possible Unsafe Message Detected",
+            title=title,
             description="The original message was not deleted.",
-            color=nextcord.Color.orange(),
+            color=nextcord.Color.orange() if unsafe else nextcord.Color.blue(),
         )
         embed.add_field(name="User", value=f"{author_mention} (`{author_id}`)", inline=False)
         embed.add_field(name="Channel", value=channel_mention, inline=True)
-        embed.add_field(name="Score", value=f"{assessment.score}/100", inline=True)
-        embed.add_field(name="Reasons", value=clip("\n".join(f"- {reason}" for reason in assessment.reasons), 1000), inline=False)
+        if assessment is not None:
+            embed.add_field(name="Score", value=f"{assessment.score}/100", inline=True)
+            embed.add_field(
+                name="Reasons",
+                value=clip("\n".join(f"- {reason}" for reason in assessment.reasons), 1000),
+                inline=False,
+            )
 
         if original_content:
             embed.add_field(name="Original Text", value=clip(original_content, 1000), inline=False)
@@ -1497,7 +1493,7 @@ class ScamImageDetector(commands.Cog):
             if forwarded_text:
                 embed.add_field(name="Forwarded Text", value=clip(forwarded_text, 1000), inline=False)
 
-        if assessment.scanned_text and assessment.content_kind != "text":
+        if assessment is not None and assessment.scanned_text and assessment.content_kind != "text":
             embed.add_field(name="Scanned Text", value=clip(f"`{assessment.scanned_text}`", 1000), inline=False)
 
         jump_url = getattr(message, "jump_url", None)
@@ -1531,6 +1527,9 @@ class ScamImageDetector(commands.Cog):
         if getattr(message, "guild", None) is None:
             return
 
+        if getattr(getattr(message, "channel", None), "id", None) == REVIEW_CHANNEL_ID:
+            return
+
         author = getattr(message, "author", None)
         if getattr(author, "bot", False):
             return
@@ -1541,10 +1540,11 @@ class ScamImageDetector(commands.Cog):
         message_id = getattr(message, "id", None)
 
         if message_id is not None:
-            if message_id in self.alerted_message_ids or message_id in self._processing_ids:
+            if message_id in self._processing_ids:
                 return
             self._processing_ids.add(message_id)
 
+        forwarded_sources = []
         try:
             try:
                 async with self._scan_semaphore:
@@ -1553,7 +1553,7 @@ class ScamImageDetector(commands.Cog):
                     )
             except asyncio.TimeoutError:
                 log.warning("scan timed out for message %s", message_id)
-                return
+                assessment = None
 
             if assessment is None:
                 return
@@ -1565,11 +1565,10 @@ class ScamImageDetector(commands.Cog):
 
             try:
                 await review_channel.send(
-                    content=ALERT_MESSAGE,
-                    embed=self.build_alert_embed(message, assessment, forwarded_sources),
-                    allowed_mentions=nextcord.AllowedMentions(users=True, roles=False, everyone=False),
+                    content=None,
+                    embed=self.build_review_embed(message, assessment, forwarded_sources),
+                    allowed_mentions=nextcord.AllowedMentions.none(),
                 )
-                self._mark_alerted(message_id)
             except (nextcord.Forbidden, nextcord.HTTPException):
                 pass
         finally:
@@ -1582,16 +1581,12 @@ class ScamImageDetector(commands.Cog):
         await self.handle_message(message)
 
     @commands.Cog.listener()
-    async def on_message_edit(self, before: nextcord.Message, after: nextcord.Message) -> None:
-        await self.handle_message(after)
-
-    @commands.Cog.listener()
     async def on_raw_message_edit(self, payload: nextcord.RawMessageUpdateEvent) -> None:
         try:
             if not self.is_enabled_for_current_bot():
                 return
 
-            if payload.message_id in self.alerted_message_ids:
+            if payload.channel_id == REVIEW_CHANNEL_ID:
                 return
 
             await asyncio.sleep(1)

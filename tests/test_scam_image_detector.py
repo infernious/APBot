@@ -44,6 +44,7 @@ def make_message(channel_id=123, roles=None):
         embeds=[],
         reference=None,
         jump_url="https://discord.com/channels/1/123/789",
+        delete=AsyncMock(),
     )
 
 
@@ -135,7 +136,18 @@ def test_trusted_role_does_not_scan():
     review_channel.send.assert_not_awaited()
 
 
-def test_unsafe_message_from_any_channel_forwards_to_review_channel():
+def test_review_channel_messages_are_not_scanned_or_forwarded():
+    bot, review_channel = make_bot()
+    cog = ScamImageDetector(bot)
+    cog.assess_message = AsyncMock(return_value=(dangerous_assessment(), []))
+
+    asyncio.run(cog.handle_message(make_message(channel_id=REVIEW_CHANNEL_ID)))
+
+    cog.assess_message.assert_not_awaited()
+    review_channel.send.assert_not_awaited()
+
+
+def test_unsafe_message_is_forwarded_without_ping_or_deletion():
     bot, review_channel = make_bot()
     cog = ScamImageDetector(bot)
     cog.assess_message = AsyncMock(return_value=(dangerous_assessment(), []))
@@ -146,14 +158,19 @@ def test_unsafe_message_from_any_channel_forwards_to_review_channel():
     cog.assess_message.assert_awaited_once_with(message)
     review_channel.send.assert_awaited_once()
     message.channel.send.assert_not_awaited()
-    assert review_channel.send.await_args.kwargs["content"] == "<@920819377627099166>"
+    message.delete.assert_not_awaited()
+    assert review_channel.send.await_args.kwargs["content"] is None
+    assert review_channel.send.await_args.kwargs["allowed_mentions"].users is False
 
 
-def test_safe_message_is_not_forwarded():
+def test_safe_message_is_not_forwarded_or_deleted():
     bot, review_channel = make_bot()
     cog = ScamImageDetector(bot)
     cog.assess_message = AsyncMock(return_value=(None, []))
+    message = make_message(channel_id=999)
 
-    asyncio.run(cog.handle_message(make_message(channel_id=999)))
+    asyncio.run(cog.handle_message(message))
 
     review_channel.send.assert_not_awaited()
+    message.channel.send.assert_not_awaited()
+    message.delete.assert_not_awaited()
