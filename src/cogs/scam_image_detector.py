@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 import tempfile
@@ -15,15 +16,11 @@ from nextcord.ext import commands
 from bot_base import APBot
 
 
-REVIEW_USER_ID = 920819377627099166
+log = logging.getLogger(__name__)
+
+
 DEFAULT_ENABLED_BOT_IDS = {1508281890820460604}
-LOG_CHANNEL_NAMES = ("logs", "server-log", "bot-logs")
-FORWARD_CHANNEL_ID_KEYS = ("scam_detector_forward_channel_id", "scam_detector_review_channel_id")
-SAFE_MARKER = "(image marked safe)"
-DANGEROUS_MARKER = "(image marked dangerous)"
-VIDEO_SAFE_MARKER = "(video marked safe)"
-VIDEO_DANGEROUS_MARKER = "(video marked dangerous)"
-TEXT_DANGEROUS_MARKER = "(message marked dangerous)"
+REVIEW_CHANNEL_ID = 1517350483646484480
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".webm", ".m4v", ".mkv"}
 MAX_SCAN_BYTES = 8 * 1024 * 1024
@@ -49,8 +46,39 @@ SUSPICIOUS_DOMAIN_RE = re.compile(
     r"\b[\w.-]+\.(?:ru|cn|top|xyz|click|link|zip|mov|work|live|site|online|shop|gift|claim|win)\b",
     re.IGNORECASE,
 )
-MONEY_RE = re.compile(r"(?:\$|usd|cash|money|gift\s*card|nitro|robux|v-?bucks|crypto)", re.IGNORECASE)
+MONEY_RE = re.compile(
+    r"(?:\$\s?\d"
+    r"|\d[\d,]*\s*(?:k\b|grand|dollars?|usd|euros?|pounds?|bucks|thousand|million|billion)"
+    r"|(?:hundred|thousand|million|billion)\s+(?:dollars?|usd|euros?|pounds?|bucks)"
+    r"|\bdollars?\b|\beuros?\b"
+    r"|usd|cash(?:\s*app)?|money|gift\s*card|nitro|robux|v-?bucks|crypto|bitcoin|btc|eth|paypal|venmo|zelle)",
+    re.IGNORECASE,
+)
 HANDLE_RE = re.compile(r"@(?:everyone|here|[\w.-]{2,32})", re.IGNORECASE)
+DM_LURE_RE = re.compile(
+    r"\b(?:dm|dms|pm|pms|msg|message|inbox|hmu|contact|text|add)\s+me\b"
+    r"|\bdm\s+(?:me|us)\b"
+    r"|\bfirst\s+(?:\d+|person|people|few|one|to)\b"
+    r"|\bwho(?:ever)?\s+(?:dms|messages|pms|contacts)\b",
+    re.IGNORECASE,
+)
+HOOK_RE = re.compile(
+    r"\b(?:get|getting|become|becoming)\s+rich\b"
+    r"|\brich\s+quick\b"
+    r"|\bmake\s+money\s+fast\b"
+    r"|\bquick\s+(?:money|cash)\b"
+    r"|\bchance\s+to\s+win\b"
+    r"|\bwin\s+(?:\$|\d|big|one\s+(?:hundred|thousand|million|billion))",
+    re.IGNORECASE,
+)
+OFF_PLATFORM_RE = re.compile(
+    r"\b(?:telegram|whatsapp|whats\s*app|signal|wechat|kik|snapchat|t\.me)\b",
+    re.IGNORECASE,
+)
+BARE_DOMAIN_RE = re.compile(
+    r"\b[\w-]{2,}\.(?:com|net|org|io|me|gg|co|app|info|biz|live|online|site|shop|store|vip|win|top|fun|cc|tk|ml|xyz|click|link)\b",
+    re.IGNORECASE,
+)
 
 BRAND_TERMS = (
     "mrbeast",
@@ -78,6 +106,11 @@ GIVEAWAY_TERMS = (
     "congratulations",
     "selected",
     "airdrop",
+    "giving away",
+    "give away",
+    "handing out",
+    "free money",
+    "free cash",
 )
 STRONG_ACTION_TERMS = (
     "claim",
@@ -188,9 +221,14 @@ def assess_scam_text(
         reasons.append("detects explicit or adult visual content")
 
     has_brand = contains_any(normalized, BRAND_TERMS)
-    has_giveaway = contains_any(normalized, GIVEAWAY_TERMS) or bool(MONEY_RE.search(normalized))
+    has_money = bool(MONEY_RE.search(normalized))
+    has_hook = bool(HOOK_RE.search(normalized))
+    has_giveaway = contains_any(normalized, GIVEAWAY_TERMS) or has_money or has_hook
     has_strong_action = contains_any(normalized, STRONG_ACTION_TERMS)
     has_weak_action = contains_any(normalized, WEAK_ACTION_TERMS)
+    has_dm_lure = bool(DM_LURE_RE.search(normalized))
+    has_off_platform = bool(OFF_PLATFORM_RE.search(normalized))
+    has_bare_domain = bool(BARE_DOMAIN_RE.search(normalized))
     has_url = bool(URL_RE.search(normalized) or SHORTENER_RE.search(normalized) or SUSPICIOUS_DOMAIN_RE.search(normalized))
     has_parody = contains_any(normalized, PARODY_TERMS)
 
@@ -208,6 +246,25 @@ def assess_scam_text(
     elif has_weak_action:
         score += 5
         reasons.append("uses weak call-to-action language")
+
+    if has_dm_lure:
+        score += 25
+        reasons.append("asks people to DM, contact privately, or be the 'first' to respond")
+
+    if has_money and has_dm_lure:
+        score += 30
+        reasons.append("offers money or prizes in exchange for DMing or contacting privately")
+    elif has_giveaway and has_dm_lure:
+        score += 10
+        reasons.append("combines giveaway or free-stuff language with a request to contact privately")
+
+    if has_bare_domain and not has_url:
+        score += 20
+        reasons.append("points users to an external website")
+
+    if has_off_platform and (has_dm_lure or has_url or has_bare_domain):
+        score += 20
+        reasons.append("tries to move users to an off-platform app like Telegram or WhatsApp")
 
     if has_url:
         score += 30
@@ -312,8 +369,8 @@ def optional_ocr_available() -> bool:
         return True
 
     try:
-        import PIL.Image  # noqa: F401
-        import pytesseract  # noqa: F401
+        import PIL.Image
+        import pytesseract
     except ImportError:
         return False
     return True
@@ -321,8 +378,8 @@ def optional_ocr_available() -> bool:
 
 def optional_qr_available() -> bool:
     try:
-        import pyzbar.pyzbar  # noqa: F401
-        import PIL.Image  # noqa: F401
+        import pyzbar.pyzbar
+        import PIL.Image
     except ImportError:
         return False
     return True
@@ -555,6 +612,12 @@ class ScamImageDetector(commands.Cog):
     def __init__(self, bot: APBot) -> None:
         self.bot = bot
 
+    def _config_get(self, key, default=None):
+        config = getattr(self.bot, "config", None)
+        if config is None:
+            return default
+        return config.get(key, default)
+
     def enabled_bot_ids(self) -> set[int]:
         configured_ids = set(DEFAULT_ENABLED_BOT_IDS)
         config = getattr(self.bot, "config", None)
@@ -576,6 +639,8 @@ class ScamImageDetector(commands.Cog):
         return configured_ids
 
     def is_enabled_for_current_bot(self) -> bool:
+        if getattr(self.bot, "scam_detector_always_enabled", False):
+            return True
         bot_user_id = getattr(getattr(self.bot, "user", None), "id", None)
         return bot_user_id is None or bot_user_id in self.enabled_bot_ids()
 
@@ -653,48 +718,30 @@ class ScamImageDetector(commands.Cog):
             nsfw_detections=nsfw_detections,
             content_kind=content_kind if has_media else "text",
         )
+
         if not has_media and not assessment.should_alert:
             return None
         return assessment
 
-    def get_alert_channel(self, guild: nextcord.Guild, fallback) -> object:
-        text_channels = getattr(guild, "text_channels", [])
-        for channel_name in LOG_CHANNEL_NAMES:
-            channel = nextcord.utils.get(text_channels, name=channel_name)
-            if channel is not None:
-                return channel
-        return fallback
-
-    def get_forward_channel(self, guild: nextcord.Guild, fallback) -> object:
-        config = getattr(self.bot, "config", None)
-        if config is not None:
-            for key in FORWARD_CHANNEL_ID_KEYS:
-                channel_id = config.get(key)
-                if channel_id is None:
-                    continue
-
-                try:
-                    channel_id = int(channel_id)
-                except (TypeError, ValueError):
-                    continue
-
-                channel = None
-                if hasattr(self.bot, "get_channel"):
-                    channel = self.bot.get_channel(channel_id)
-                if channel is None and hasattr(guild, "get_channel"):
-                    channel = guild.get_channel(channel_id)
-                if channel is not None:
-                    return channel
-
-        return self.get_alert_channel(guild, fallback)
+    async def get_forward_channel(self):
+        channel = self.bot.get_channel(REVIEW_CHANNEL_ID)
+        if channel is not None:
+            return channel
+        try:
+            return await self.bot.fetch_channel(REVIEW_CHANNEL_ID)
+        except (AttributeError, nextcord.Forbidden, nextcord.NotFound, nextcord.HTTPException) as exc:
+            log.warning("Unable to access review channel %s: %s", REVIEW_CHANNEL_ID, exc)
+            return None
 
     def build_alert_embed(self, message: nextcord.Message, assessment: ScamAssessment) -> nextcord.Embed:
         attachments = attachment_lines(message)
         original_content = getattr(message, "content", "") or ""
         author = getattr(message, "author", None)
         author_id = getattr(author, "id", "unknown")
-        author_mention = getattr(author, "mention", str(author_id))
-        channel_mention = getattr(getattr(message, "channel", None), "mention", "unknown channel")
+        author_name = str(author) if author else str(author_id)
+        channel = getattr(message, "channel", None)
+        channel_name = getattr(channel, "name", None) or "unknown channel"
+        channel_id = getattr(channel, "id", "?")
 
         embed = nextcord.Embed(
             title="Possible Unsafe Message Detected",
@@ -703,8 +750,8 @@ class ScamImageDetector(commands.Cog):
             ),
             color=nextcord.Color.orange(),
         )
-        embed.add_field(name="User", value=f"{author_mention} (`{author_id}`)", inline=False)
-        embed.add_field(name="Channel", value=channel_mention, inline=True)
+        embed.add_field(name="User", value=f"{author_name} (`{author_id}`)", inline=False)
+        embed.add_field(name="Channel", value=f"#{channel_name} (`{channel_id}`)", inline=True)
         embed.add_field(name="Risk", value=f"{assessment.level.title()} ({assessment.score}/100)", inline=True)
         embed.add_field(name="Reasons", value=clip("\n".join(f"- {reason}" for reason in assessment.reasons), 1000), inline=False)
         if original_content:
@@ -721,22 +768,6 @@ class ScamImageDetector(commands.Cog):
 
         return embed
 
-    async def send_safety_marker(self, message: nextcord.Message, assessment: ScamAssessment) -> None:
-        if assessment.content_kind == "text" and not assessment.should_alert:
-            return
-
-        if assessment.content_kind == "text":
-            marker = TEXT_DANGEROUS_MARKER
-        elif assessment.content_kind == "video":
-            marker = VIDEO_DANGEROUS_MARKER if assessment.should_alert else VIDEO_SAFE_MARKER
-        else:
-            marker = DANGEROUS_MARKER if assessment.should_alert else SAFE_MARKER
-
-        try:
-            await message.channel.send(marker)
-        except (nextcord.Forbidden, nextcord.HTTPException):
-            pass
-
     @commands.Cog.listener()
     async def on_message(self, message: nextcord.Message) -> None:
         if not self.is_enabled_for_current_bot():
@@ -752,21 +783,26 @@ class ScamImageDetector(commands.Cog):
         if assessment is None:
             return
 
-        await self.send_safety_marker(message, assessment)
-
         if not assessment.should_alert:
             return
 
-        alert_channel = self.get_forward_channel(message.guild, message.channel)
+        alert_channel = await self.get_forward_channel()
+        if alert_channel is None:
+            return
+
+        source_channel_id = getattr(getattr(message, "channel", None), "id", None)
+        if source_channel_id == REVIEW_CHANNEL_ID:
+            return
+
         embed = self.build_alert_embed(message, assessment)
         try:
             await alert_channel.send(
-                content=f"<@{REVIEW_USER_ID}>",
+                content=None,
                 embed=embed,
-                allowed_mentions=nextcord.AllowedMentions(users=True, roles=False, everyone=False),
+                allowed_mentions=nextcord.AllowedMentions.none(),
             )
-        except (nextcord.Forbidden, nextcord.HTTPException):
-            pass
+        except (nextcord.Forbidden, nextcord.HTTPException) as exc:
+            log.warning("Unable to forward message %s: %s", getattr(message, "id", "unknown"), exc)
 
 
 def setup(bot: APBot) -> None:
