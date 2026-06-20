@@ -24,6 +24,7 @@ def attachment(filename="scam.png", content_type="image/png", url="https://cdn.d
         proxy_url=None,
         size=1024,
         read=AsyncMock(return_value=b""),
+        to_file=AsyncMock(return_value=SimpleNamespace(filename=filename)),
     )
 
 
@@ -77,6 +78,25 @@ def test_ocr_mrbeast_claim_scam_alerts_without_message_text():
     )
 
     assert assessment.should_alert is True
+
+
+def test_stock_price_screenshot_is_not_flagged():
+    assessment = assess_scam_text(
+        """
+        <@532332835051143168> after roblox kids released
+        image.png
+        These are results for roblox stock
+        Roblox Corp NYSE RBLX 51.53 USD
+        Closed Jun 18 7:59 PM EDT Disclaimer
+        NVIDIA Corp After hours 51.70 0.33% 210.69 USD YTD
+        https://finance.example.com/stock
+        """,
+        has_visual_attachment=True,
+    )
+
+    assert assessment.should_alert is False
+    assert assessment.score < ALERT_THRESHOLD
+    assert "asks users to claim, verify, log in, scan, or enter sensitive info" not in assessment.reasons
 
 
 def test_mrbeast_free_money_page_ad_alerts_without_url():
@@ -159,6 +179,9 @@ def test_on_message_forwards_alert_without_ping_or_deletion():
     assert review_channel.send.await_args.kwargs["content"] is None
     assert review_channel.send.await_args.kwargs["allowed_mentions"].users is False
     assert review_channel.send.await_args.kwargs["embed"].title == "Possible Unsafe Message Detected"
+    assert review_channel.send.await_args.kwargs["files"][0].filename == "scam.png"
+    assert review_channel.send.await_args.kwargs["embed"].image.url == "attachment://scam.png"
+    assert all(field.name != "Scanned Text" for field in review_channel.send.await_args.kwargs["embed"].fields)
     logs_channel.send.assert_not_awaited()
     message_channel.send.assert_not_awaited()
     message.delete.assert_not_awaited()
@@ -273,6 +296,31 @@ def test_direct_image_link_counts_as_visual_message():
     assert assessment.should_alert is True
 
 
+def test_direct_gif_link_is_forwarded_for_preview():
+    review_channel = SimpleNamespace(id=REVIEW_CHANNEL_ID, send=AsyncMock())
+    bot = SimpleNamespace(
+        user=SimpleNamespace(id=next(iter(DEFAULT_ENABLED_BOT_IDS))),
+        get_channel=lambda channel_id: review_channel if channel_id == REVIEW_CHANNEL_ID else None,
+    )
+    cog = ScamImageDetector(bot)
+    gif_url = "https://tenor.com/view/fake-mrbeast-giveaway-gif-123"
+    message = SimpleNamespace(
+        id=999,
+        guild=SimpleNamespace(id=1),
+        author=SimpleNamespace(id=111, bot=False),
+        channel=SimpleNamespace(id=123, name="general"),
+        content=f"MrBeast giveaway claim $500 verify now {gif_url}",
+        attachments=[],
+        embeds=[],
+        jump_url="https://discord.com/channels/1/123/999",
+    )
+
+    asyncio.run(cog.on_message(message))
+
+    review_channel.send.assert_awaited_once()
+    assert review_channel.send.await_args.kwargs["content"] == gif_url
+
+
 def test_plain_scam_text_is_forwarded_without_source_channel_marker():
     review_channel = SimpleNamespace(id=REVIEW_CHANNEL_ID, send=AsyncMock())
     bot = SimpleNamespace(
@@ -374,6 +422,7 @@ def test_explicit_video_is_forwarded_without_source_channel_marker():
     message_channel.send.assert_not_awaited()
     logs_channel.send.assert_not_awaited()
     review_channel.send.assert_awaited_once()
+    assert review_channel.send.await_args.kwargs["files"][0].filename == "clip.mp4"
 
 
 def test_dangerous_message_forwards_to_fixed_review_channel():

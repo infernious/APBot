@@ -151,6 +151,18 @@ PARODY_TERMS = (
     "drawing",
     "drawn",
 )
+STOCK_MARKET_TERMS = (
+    "stock",
+    "share price",
+    "nyse",
+    "nasdaq",
+    "ticker",
+    "market cap",
+    "after hours",
+    "portfolio",
+    "shares",
+    "ytd",
+)
 NSFW_CLASSES = {
     "ANUS_EXPOSED",
     "BUTTOCKS_EXPOSED",
@@ -188,8 +200,12 @@ def normalize_text(value: Optional[str]) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip().lower()
 
 
+def contains_term(text: str, term: str) -> bool:
+    return re.search(rf"(?<!\w){re.escape(term)}(?!\w)", text) is not None
+
+
 def contains_any(text: str, terms: Iterable[str]) -> bool:
-    return any(term in text for term in terms)
+    return any(contains_term(text, term) for term in terms)
 
 
 def score_to_level(score: int) -> str:
@@ -223,7 +239,8 @@ def assess_scam_text(
     has_brand = contains_any(normalized, BRAND_TERMS)
     has_money = bool(MONEY_RE.search(normalized))
     has_hook = bool(HOOK_RE.search(normalized))
-    has_giveaway = contains_any(normalized, GIVEAWAY_TERMS) or has_money or has_hook
+    has_reward_language = contains_any(normalized, GIVEAWAY_TERMS)
+    has_giveaway = has_reward_language or has_money or has_hook
     has_strong_action = contains_any(normalized, STRONG_ACTION_TERMS)
     has_weak_action = contains_any(normalized, WEAK_ACTION_TERMS)
     has_dm_lure = bool(DM_LURE_RE.search(normalized))
@@ -289,6 +306,19 @@ def assess_scam_text(
     if has_parody and not has_url and not has_qr and not has_strong_action:
         score = max(0, score - 25)
         reasons.append("looks like a joke/parody without a link, QR code, or account action")
+
+    stock_context_signals = sum(contains_term(normalized, term) for term in STOCK_MARKET_TERMS)
+    if (
+        stock_context_signals >= 2
+        and not has_reward_language
+        and not has_hook
+        and not has_strong_action
+        and not has_dm_lure
+        and not has_off_platform
+        and not has_qr
+    ):
+        score = min(score, REVIEW_THRESHOLD - 1)
+        reasons.append("looks like stock market information without a solicitation")
 
     score = min(score, 100)
     if score < REVIEW_THRESHOLD and not reasons:
@@ -745,9 +775,7 @@ class ScamImageDetector(commands.Cog):
 
         embed = nextcord.Embed(
             title="Possible Unsafe Message Detected",
-            description=(
-                "This was forwarded for human review. The bot did not delete the original message or re-upload media."
-            ),
+            description="This was forwarded for human review. The bot did not delete the original message.",
             color=nextcord.Color.orange(),
         )
         embed.add_field(name="User", value=f"{author_name} (`{author_id}`)", inline=False)
@@ -756,9 +784,6 @@ class ScamImageDetector(commands.Cog):
         embed.add_field(name="Reasons", value=clip("\n".join(f"- {reason}" for reason in assessment.reasons), 1000), inline=False)
         if original_content:
             embed.add_field(name="Original Text", value=clip(original_content, 1000), inline=False)
-        if assessment.scanned_text:
-            embed.add_field(name="Scanned Text", value=clip(f"`{assessment.scanned_text}`", 1000), inline=False)
-
         jump_url = getattr(message, "jump_url", None)
         if jump_url:
             embed.add_field(name="Message", value=f"[Jump to message]({jump_url})", inline=False)
@@ -767,6 +792,25 @@ class ScamImageDetector(commands.Cog):
             embed.add_field(name="Attachments", value=clip("\n".join(attachments), 1000), inline=False)
 
         return embed
+
+    async def get_forward_files(self, message: nextcord.Message) -> tuple[list[nextcord.File], Optional[str]]:
+        files = []
+        preview_filename = None
+
+        for attachment in (getattr(message, "attachments", []) or [])[:10]:
+            if not (is_visual_attachment(attachment) or is_video_attachment(attachment)):
+                continue
+
+            try:
+                forwarded_file = await attachment.to_file(use_cached=True)
+            except (AttributeError, nextcord.Forbidden, nextcord.NotFound, nextcord.HTTPException):
+                continue
+
+            files.append(forwarded_file)
+            if preview_filename is None and is_visual_attachment(attachment):
+                preview_filename = forwarded_file.filename
+
+        return files, preview_filename
 
     @commands.Cog.listener()
     async def on_message(self, message: nextcord.Message) -> None:
@@ -795,14 +839,38 @@ class ScamImageDetector(commands.Cog):
             return
 
         embed = self.build_alert_embed(message, assessment)
+        files, preview_filename = await self.get_forward_files(message)
+        media_urls = visual_urls_from_message(message)
+        content = "\n".join(media_urls) or None
+        if preview_filename:
+            embed.set_image(url=f"attachment://{preview_filename}")
+
+        send_kwargs = {
+            "content": content,
+            "embed": embed,
+            "allowed_mentions": nextcord.AllowedMentions.none(),
+        }
+        if files:
+            send_kwargs["files"] = files
+
         try:
-            await alert_channel.send(
-                content=None,
-                embed=embed,
-                allowed_mentions=nextcord.AllowedMentions.none(),
-            )
-        except (nextcord.Forbidden, nextcord.HTTPException) as exc:
+            await alert_channel.send(**send_kwargs)
+        except nextcord.Forbidden as exc:
             log.warning("Unable to forward message %s: %s", getattr(message, "id", "unknown"), exc)
+        except nextcord.HTTPException as exc:
+            if not files:
+                log.warning("Unable to forward message %s: %s", getattr(message, "id", "unknown"), exc)
+                return
+
+            embed.remove_image()
+            try:
+                await alert_channel.send(
+                    content=content,
+                    embed=embed,
+                    allowed_mentions=nextcord.AllowedMentions.none(),
+                )
+            except (nextcord.Forbidden, nextcord.HTTPException) as retry_exc:
+                log.warning("Unable to forward message %s: %s", getattr(message, "id", "unknown"), retry_exc)
 
 
 def setup(bot: APBot) -> None:
