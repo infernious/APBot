@@ -21,6 +21,16 @@ log = logging.getLogger(__name__)
 
 DEFAULT_ENABLED_BOT_IDS = {1508281890820460604, 1464966749643341847}
 REVIEW_CHANNEL_ID = 1517350483646484480
+MODERATION_BYPASS_ROLE_IDS = {
+    1259554509559169159,
+    587392891220131860,
+    182222541857751040,
+    1201290738953093240,
+    1207394456584847461,
+    299005509065900045,
+    814369761030701058,
+    939015562619678781,
+}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".webm", ".m4v", ".mkv"}
 MAX_SCAN_BYTES = 8 * 1024 * 1024
@@ -219,6 +229,10 @@ def contains_term(text: str, term: str) -> bool:
 
 def contains_any(text: str, terms: Iterable[str]) -> bool:
     return any(contains_term(text, term) for term in terms)
+
+
+def has_moderation_bypass_role(member) -> bool:
+    return any(getattr(role, "id", None) in MODERATION_BYPASS_ROLE_IDS for role in getattr(member, "roles", []))
 
 
 def score_to_level(score: int) -> str:
@@ -838,7 +852,11 @@ class ScamImageDetector(commands.Cog):
         if getattr(message, "guild", None) is None:
             return
 
-        if getattr(getattr(message, "author", None), "bot", False):
+        author = getattr(message, "author", None)
+        if getattr(author, "bot", False):
+            return
+
+        if has_moderation_bypass_role(author):
             return
 
         source_channel_id = getattr(getattr(message, "channel", None), "id", None)

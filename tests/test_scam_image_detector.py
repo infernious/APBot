@@ -5,10 +5,12 @@ from unittest.mock import AsyncMock
 from cogs.scam_image_detector import (
     ALERT_THRESHOLD,
     DEFAULT_ENABLED_BOT_IDS,
+    MODERATION_BYPASS_ROLE_IDS,
     REVIEW_CHANNEL_ID,
     REVIEW_THRESHOLD,
     ScamImageDetector,
     assess_scam_text,
+    has_moderation_bypass_role,
     is_visual_attachment,
     is_visual_url,
     is_video_attachment,
@@ -192,6 +194,42 @@ def test_detector_can_be_forced_on_for_standalone_safety_bot():
     bot = SimpleNamespace(user=SimpleNamespace(id=123), scam_detector_always_enabled=True)
 
     assert ScamImageDetector(bot).is_enabled_for_current_bot()
+
+
+def test_moderation_bypass_roles_match_all_requested_ids():
+    assert MODERATION_BYPASS_ROLE_IDS == {
+        1259554509559169159,
+        587392891220131860,
+        182222541857751040,
+        1201290738953093240,
+        1207394456584847461,
+        299005509065900045,
+        814369761030701058,
+        939015562619678781,
+    }
+    member = SimpleNamespace(roles=[SimpleNamespace(id=1259554509559169159)])
+    assert has_moderation_bypass_role(member) is True
+
+
+def test_moderation_bypass_role_skips_scanning_and_forwarding():
+    review_channel = SimpleNamespace(id=REVIEW_CHANNEL_ID, send=AsyncMock())
+    bot = SimpleNamespace(user=SimpleNamespace(id=next(iter(DEFAULT_ENABLED_BOT_IDS))))
+    cog = ScamImageDetector(bot)
+    cog.assess_message = AsyncMock()
+    message = SimpleNamespace(
+        guild=SimpleNamespace(id=1),
+        author=SimpleNamespace(
+            id=111,
+            bot=False,
+            roles=[SimpleNamespace(id=1259554509559169159)],
+        ),
+        channel=SimpleNamespace(id=123),
+    )
+
+    asyncio.run(cog.on_message(message))
+
+    cog.assess_message.assert_not_awaited()
+    review_channel.send.assert_not_awaited()
 
 
 def test_on_message_forwards_alert_without_ping_or_deletion():
