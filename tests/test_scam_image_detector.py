@@ -207,7 +207,7 @@ def test_on_message_ignores_messages_when_running_on_other_bot():
 
 
 def test_on_message_ignores_the_review_channel():
-    bot = SimpleNamespace(user=SimpleNamespace(id=next(iter(DEFAULT_ENABLED_BOT_IDS))))
+    bot = SimpleNamespace(user=SimpleNamespace(id=next(iter(DEFAULT_ENABLED_BOT_IDS))), get_channel=lambda _: None)
     cog = ScamImageDetector(bot)
     cog.assess_message = AsyncMock()
     message = SimpleNamespace(

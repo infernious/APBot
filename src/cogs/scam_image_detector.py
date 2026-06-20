@@ -779,6 +779,10 @@ class ScamImageDetector(commands.Cog):
         if getattr(getattr(message, "author", None), "bot", False):
             return
 
+        source_channel_id = getattr(getattr(message, "channel", None), "id", None)
+        if source_channel_id == REVIEW_CHANNEL_ID:
+            return
+
         assessment = await self.assess_message(message)
         if assessment is None:
             return
@@ -788,10 +792,6 @@ class ScamImageDetector(commands.Cog):
 
         alert_channel = await self.get_forward_channel()
         if alert_channel is None:
-            return
-
-        source_channel_id = getattr(getattr(message, "channel", None), "id", None)
-        if source_channel_id == REVIEW_CHANNEL_ID:
             return
 
         embed = self.build_alert_embed(message, assessment)
