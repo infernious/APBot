@@ -19,7 +19,7 @@ from bot_base import APBot
 log = logging.getLogger(__name__)
 
 
-DEFAULT_ENABLED_BOT_IDS = {1508281890820460604}
+DEFAULT_ENABLED_BOT_IDS = {1508281890820460604, 1464966749643341847}
 REVIEW_CHANNEL_ID = 1517350483646484480
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".webm", ".m4v", ".mkv"}
