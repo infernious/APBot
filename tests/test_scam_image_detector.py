@@ -4,13 +4,9 @@ from unittest.mock import AsyncMock
 
 from cogs.scam_image_detector import (
     ALERT_THRESHOLD,
-    DANGEROUS_MARKER,
     DEFAULT_ENABLED_BOT_IDS,
-    REVIEW_USER_ID,
-    SAFE_MARKER,
-    TEXT_DANGEROUS_MARKER,
-    VIDEO_DANGEROUS_MARKER,
-    VIDEO_SAFE_MARKER,
+    REVIEW_CHANNEL_ID,
+    REVIEW_THRESHOLD,
     ScamImageDetector,
     assess_scam_text,
     is_visual_attachment,
@@ -129,13 +125,23 @@ def test_detector_can_be_enabled_for_configured_application_id():
     assert ScamImageDetector(bot).is_enabled_for_current_bot()
 
 
-def test_on_message_sends_staff_alert_to_logs_channel():
-    bot = SimpleNamespace(user=SimpleNamespace(id=next(iter(DEFAULT_ENABLED_BOT_IDS))))
+def test_detector_can_be_forced_on_for_standalone_safety_bot():
+    bot = SimpleNamespace(user=SimpleNamespace(id=123), scam_detector_always_enabled=True)
+
+    assert ScamImageDetector(bot).is_enabled_for_current_bot()
+
+
+def test_on_message_forwards_alert_without_ping_or_deletion():
+    review_channel = SimpleNamespace(id=REVIEW_CHANNEL_ID, send=AsyncMock())
+    bot = SimpleNamespace(
+        user=SimpleNamespace(id=next(iter(DEFAULT_ENABLED_BOT_IDS))),
+        get_channel=lambda channel_id: review_channel if channel_id == REVIEW_CHANNEL_ID else None,
+    )
     cog = ScamImageDetector(bot)
     cog.scan_attachment = AsyncMock(return_value=("", False, ()))
 
     logs_channel = SimpleNamespace(name="logs", send=AsyncMock())
-    message_channel = SimpleNamespace(name="general", mention="#general", send=AsyncMock())
+    message_channel = SimpleNamespace(id=123, name="general", mention="#general", send=AsyncMock())
     guild = SimpleNamespace(id=1, text_channels=[logs_channel])
     message = SimpleNamespace(
         guild=guild,
@@ -144,14 +150,18 @@ def test_on_message_sends_staff_alert_to_logs_channel():
         content="MrBeast giveaway! Claim your free $500 prize now and verify at https://bit.ly/fake",
         attachments=[attachment()],
         jump_url="https://discord.com/channels/1/2/3",
+        delete=AsyncMock(),
     )
 
     asyncio.run(cog.on_message(message))
 
-    logs_channel.send.assert_awaited_once()
-    assert logs_channel.send.await_args.kwargs["content"] == f"<@{REVIEW_USER_ID}>"
-    assert logs_channel.send.await_args.kwargs["embed"].title == "Possible Unsafe Message Detected"
-    message_channel.send.assert_awaited_once_with(DANGEROUS_MARKER)
+    review_channel.send.assert_awaited_once()
+    assert review_channel.send.await_args.kwargs["content"] is None
+    assert review_channel.send.await_args.kwargs["allowed_mentions"].users is False
+    assert review_channel.send.await_args.kwargs["embed"].title == "Possible Unsafe Message Detected"
+    logs_channel.send.assert_not_awaited()
+    message_channel.send.assert_not_awaited()
+    message.delete.assert_not_awaited()
 
 
 def test_on_message_ignores_low_risk_joke_image():
@@ -160,7 +170,7 @@ def test_on_message_ignores_low_risk_joke_image():
     cog.scan_attachment = AsyncMock(return_value=("", False, ()))
 
     logs_channel = SimpleNamespace(name="logs", send=AsyncMock())
-    message_channel = SimpleNamespace(name="general", mention="#general", send=AsyncMock())
+    message_channel = SimpleNamespace(id=123, name="general", mention="#general", send=AsyncMock())
     message = SimpleNamespace(
         guild=SimpleNamespace(id=1, text_channels=[logs_channel]),
         author=SimpleNamespace(id=111, mention="<@111>", bot=False),
@@ -173,7 +183,7 @@ def test_on_message_ignores_low_risk_joke_image():
     asyncio.run(cog.on_message(message))
 
     logs_channel.send.assert_not_awaited()
-    message_channel.send.assert_awaited_once_with(SAFE_MARKER)
+    message_channel.send.assert_not_awaited()
 
 
 def test_on_message_ignores_messages_when_running_on_other_bot():
@@ -194,6 +204,21 @@ def test_on_message_ignores_messages_when_running_on_other_bot():
     asyncio.run(cog.on_message(message))
 
     logs_channel.send.assert_not_awaited()
+
+
+def test_on_message_ignores_the_review_channel():
+    bot = SimpleNamespace(user=SimpleNamespace(id=next(iter(DEFAULT_ENABLED_BOT_IDS))))
+    cog = ScamImageDetector(bot)
+    cog.assess_message = AsyncMock()
+    message = SimpleNamespace(
+        guild=SimpleNamespace(id=1),
+        author=SimpleNamespace(id=111, mention="<@111>", bot=False),
+        channel=SimpleNamespace(id=REVIEW_CHANNEL_ID),
+    )
+
+    asyncio.run(cog.on_message(message))
+
+    cog.assess_message.assert_not_awaited()
 
 
 def test_attachment_cdn_url_does_not_make_giveaway_joke_high_risk():
@@ -248,12 +273,16 @@ def test_direct_image_link_counts_as_visual_message():
     assert assessment.should_alert is True
 
 
-def test_plain_scam_text_is_marked_dangerous_without_media():
-    bot = SimpleNamespace(user=SimpleNamespace(id=next(iter(DEFAULT_ENABLED_BOT_IDS))))
+def test_plain_scam_text_is_forwarded_without_source_channel_marker():
+    review_channel = SimpleNamespace(id=REVIEW_CHANNEL_ID, send=AsyncMock())
+    bot = SimpleNamespace(
+        user=SimpleNamespace(id=next(iter(DEFAULT_ENABLED_BOT_IDS))),
+        get_channel=lambda channel_id: review_channel if channel_id == REVIEW_CHANNEL_ID else None,
+    )
     cog = ScamImageDetector(bot)
 
     logs_channel = SimpleNamespace(name="logs", send=AsyncMock())
-    message_channel = SimpleNamespace(name="general", mention="#general", send=AsyncMock())
+    message_channel = SimpleNamespace(id=123, name="general", mention="#general", send=AsyncMock())
     message = SimpleNamespace(
         guild=SimpleNamespace(id=1, text_channels=[logs_channel]),
         author=SimpleNamespace(id=111, mention="<@111>", bot=False),
@@ -266,9 +295,10 @@ def test_plain_scam_text_is_marked_dangerous_without_media():
 
     asyncio.run(cog.on_message(message))
 
-    message_channel.send.assert_awaited_once_with(TEXT_DANGEROUS_MARKER)
-    logs_channel.send.assert_awaited_once()
-    sent_embed = logs_channel.send.await_args.kwargs["embed"]
+    message_channel.send.assert_not_awaited()
+    logs_channel.send.assert_not_awaited()
+    review_channel.send.assert_awaited_once()
+    sent_embed = review_channel.send.await_args.kwargs["embed"]
     assert sent_embed.title == "Possible Unsafe Message Detected"
     assert any(field.name == "Original Text" for field in sent_embed.fields)
 
@@ -295,13 +325,13 @@ def test_normal_plain_text_is_ignored_without_safe_spam():
     logs_channel.send.assert_not_awaited()
 
 
-def test_safe_video_gets_video_safe_marker():
+def test_safe_video_does_not_post_a_marker_or_alert():
     bot = SimpleNamespace(user=SimpleNamespace(id=next(iter(DEFAULT_ENABLED_BOT_IDS))))
     cog = ScamImageDetector(bot)
     cog.scan_video_attachment = AsyncMock(return_value=("", False, ()))
 
     logs_channel = SimpleNamespace(name="logs", send=AsyncMock())
-    message_channel = SimpleNamespace(name="general", mention="#general", send=AsyncMock())
+    message_channel = SimpleNamespace(id=123, name="general", mention="#general", send=AsyncMock())
     message = SimpleNamespace(
         guild=SimpleNamespace(id=1, text_channels=[logs_channel]),
         author=SimpleNamespace(id=111, mention="<@111>", bot=False),
@@ -314,17 +344,21 @@ def test_safe_video_gets_video_safe_marker():
 
     asyncio.run(cog.on_message(message))
 
-    message_channel.send.assert_awaited_once_with(VIDEO_SAFE_MARKER)
+    message_channel.send.assert_not_awaited()
     logs_channel.send.assert_not_awaited()
 
 
-def test_explicit_video_gets_video_dangerous_marker_and_alert():
-    bot = SimpleNamespace(user=SimpleNamespace(id=next(iter(DEFAULT_ENABLED_BOT_IDS))))
+def test_explicit_video_is_forwarded_without_source_channel_marker():
+    review_channel = SimpleNamespace(id=REVIEW_CHANNEL_ID, send=AsyncMock())
+    bot = SimpleNamespace(
+        user=SimpleNamespace(id=next(iter(DEFAULT_ENABLED_BOT_IDS))),
+        get_channel=lambda channel_id: review_channel if channel_id == REVIEW_CHANNEL_ID else None,
+    )
     cog = ScamImageDetector(bot)
     cog.scan_video_attachment = AsyncMock(return_value=("", False, ("FEMALE_GENITALIA_EXPOSED (0.93)",)))
 
     logs_channel = SimpleNamespace(name="logs", send=AsyncMock())
-    message_channel = SimpleNamespace(name="general", mention="#general", send=AsyncMock())
+    message_channel = SimpleNamespace(id=123, name="general", mention="#general", send=AsyncMock())
     message = SimpleNamespace(
         guild=SimpleNamespace(id=1, text_channels=[logs_channel]),
         author=SimpleNamespace(id=111, mention="<@111>", bot=False),
@@ -337,24 +371,22 @@ def test_explicit_video_gets_video_dangerous_marker_and_alert():
 
     asyncio.run(cog.on_message(message))
 
-    message_channel.send.assert_awaited_once_with(VIDEO_DANGEROUS_MARKER)
-    logs_channel.send.assert_awaited_once()
+    message_channel.send.assert_not_awaited()
+    logs_channel.send.assert_not_awaited()
+    review_channel.send.assert_awaited_once()
 
 
-def test_dangerous_message_forwards_to_configured_review_channel():
-    review_channel = SimpleNamespace(id=999, name="scam-review", send=AsyncMock())
+def test_dangerous_message_forwards_to_fixed_review_channel():
+    review_channel = SimpleNamespace(id=REVIEW_CHANNEL_ID, name="scam-review", send=AsyncMock())
     logs_channel = SimpleNamespace(name="logs", send=AsyncMock())
     bot = SimpleNamespace(
         user=SimpleNamespace(id=next(iter(DEFAULT_ENABLED_BOT_IDS))),
-        config=SimpleNamespace(
-            get=lambda key, default=None: 999 if key == "scam_detector_forward_channel_id" else default
-        ),
-        get_channel=lambda channel_id: review_channel if channel_id == 999 else None,
+        get_channel=lambda channel_id: review_channel if channel_id == REVIEW_CHANNEL_ID else None,
     )
     cog = ScamImageDetector(bot)
     cog.scan_video_attachment = AsyncMock(return_value=("", False, ("MALE_GENITALIA_EXPOSED (0.93)",)))
 
-    message_channel = SimpleNamespace(name="general", mention="#general", send=AsyncMock())
+    message_channel = SimpleNamespace(id=123, name="general", mention="#general", send=AsyncMock())
     message = SimpleNamespace(
         guild=SimpleNamespace(id=1, text_channels=[logs_channel]),
         author=SimpleNamespace(id=111, mention="<@111>", bot=False),
@@ -371,3 +403,49 @@ def test_dangerous_message_forwards_to_configured_review_channel():
     logs_channel.send.assert_not_awaited()
     sent_embed = review_channel.send.await_args.kwargs["embed"]
     assert any("clip.mp4" in field.value for field in sent_embed.fields if field.name == "Attachments")
+
+
+def test_dm_for_money_scam_text_alerts():
+    assessment = assess_scam_text(
+        "Hello! My name is Push and I'm giving away 200 THOUSAND dollars to the first person who DMs me!",
+        has_visual_attachment=False,
+        content_kind="text",
+    )
+
+    assert assessment.should_alert is True
+    assert assessment.content_kind == "text"
+
+
+def test_free_nitro_dm_scam_alerts():
+    assessment = assess_scam_text("Free Nitro! DM me to claim", has_visual_attachment=False)
+
+    assert assessment.should_alert is True
+
+
+def test_dm_me_homework_is_ignored():
+    assessment = assess_scam_text("hey can you dm me your homework notes", has_visual_attachment=False)
+
+    assert assessment.score < REVIEW_THRESHOLD
+    assert assessment.should_alert is False
+
+
+def test_first_to_finish_is_not_an_alert():
+    assessment = assess_scam_text("first person to finish the quiz gets a gold star", has_visual_attachment=False)
+
+    assert assessment.should_alert is False
+
+
+def test_get_rich_offsite_telegram_scam_alerts():
+    assessment = assess_scam_text(
+        "Hello, are you looking to get rich! Just go to push.com or DM me on telegram at @pushh for a chance to win one million dollars!",
+        has_visual_attachment=False,
+        content_kind="text",
+    )
+
+    assert assessment.should_alert is True
+
+
+def test_million_dollars_spelled_out_counts_as_money():
+    assessment = assess_scam_text("win one million dollars, dm me now", has_visual_attachment=False)
+
+    assert assessment.should_alert is True
