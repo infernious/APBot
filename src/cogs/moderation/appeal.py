@@ -23,7 +23,8 @@ from config_handler import Config
 config_path = "config.json"
 conf = Config(config_path)
 
-APPEAL_GUILD_ID = int(conf.get("ban_appeal_server"))
+ban_appeal_server = conf.get("ban_appeal_server")
+APPEAL_GUILD_IDS = [int(ban_appeal_server)] if ban_appeal_server is not None else []
 
 REVIEW_DELAY_SECONDS = 60 * 60 * 24 * 14  # 2 weeks
 REAPPEAL_DELAY_SECONDS = 60 * 60 * 24 * 84  # 12 weeks
@@ -302,7 +303,7 @@ class BanAppeal(commands.Cog):
     @slash_command(
         name="appealbutton",
         default_member_permissions=0x8,
-        guild_ids=[APPEAL_GUILD_ID],
+        guild_ids=APPEAL_GUILD_IDS,
     )
     async def send_appeal_button(self, inter: Interaction):
         await inter.send(
