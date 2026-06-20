@@ -104,7 +104,6 @@ GIVEAWAY_TERMS = (
     "free",
     "limited time",
     "congratulations",
-    "selected",
     "airdrop",
     "giving away",
     "give away",
@@ -137,7 +136,6 @@ WEAK_ACTION_TERMS = (
     "visit",
     "page",
     "continue",
-    "follow",
     "subscribe",
 )
 PARODY_TERMS = (
@@ -162,6 +160,21 @@ STOCK_MARKET_TERMS = (
     "portfolio",
     "shares",
     "ytd",
+)
+MODERATION_EVIDENCE_TERMS = (
+    "possible unsafe message detected",
+    "forwarded for human review",
+    "message deleted",
+    "jump to message",
+    "report summary",
+    "selected message",
+    "report category",
+    "submit report",
+)
+SELECTED_WINNER_RE = re.compile(
+    r"\b(?:you(?:'ve| have)?(?: been)?|you are|you were)\s+selected\b"
+    r"|\bselected\s+(?:winner|for\s+(?:a\s+)?(?:prize|reward|giveaway))\b",
+    re.IGNORECASE,
 )
 NSFW_CLASSES = {
     "ANUS_EXPOSED",
@@ -239,7 +252,7 @@ def assess_scam_text(
     has_brand = contains_any(normalized, BRAND_TERMS)
     has_money = bool(MONEY_RE.search(normalized))
     has_hook = bool(HOOK_RE.search(normalized))
-    has_reward_language = contains_any(normalized, GIVEAWAY_TERMS)
+    has_reward_language = contains_any(normalized, GIVEAWAY_TERMS) or bool(SELECTED_WINNER_RE.search(normalized))
     has_giveaway = has_reward_language or has_money or has_hook
     has_strong_action = contains_any(normalized, STRONG_ACTION_TERMS)
     has_weak_action = contains_any(normalized, WEAK_ACTION_TERMS)
@@ -319,6 +332,11 @@ def assess_scam_text(
     ):
         score = min(score, REVIEW_THRESHOLD - 1)
         reasons.append("looks like stock market information without a solicitation")
+
+    moderation_evidence_signals = sum(contains_term(normalized, term) for term in MODERATION_EVIDENCE_TERMS)
+    if moderation_evidence_signals >= 2 and not nsfw_detections:
+        score = min(score, REVIEW_THRESHOLD - 1)
+        reasons.append("looks like a screenshot of moderation or report evidence")
 
     score = min(score, 100)
     if score < REVIEW_THRESHOLD and not reasons:

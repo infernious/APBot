@@ -99,6 +99,49 @@ def test_stock_price_screenshot_is_not_flagged():
     assert "asks users to claim, verify, log in, scan, or enter sensitive info" not in assessment.reasons
 
 
+def test_existing_moderation_alert_screenshot_is_not_flagged_again():
+    assessment = assess_scam_text(
+        """
+        Possible Unsafe Message Detected
+        This was forwarded for human review. The bot did not delete the original message.
+        Message Deleted
+        Jump to message
+        MrBeast giveaway claim your free prize and verify now
+        """,
+        has_visual_attachment=True,
+    )
+
+    assert assessment.should_alert is False
+    assert assessment.score < ALERT_THRESHOLD
+
+
+def test_discord_report_summary_screenshot_is_not_flagged():
+    assessment = assess_scam_text(
+        """
+        Report Summary
+        Review your report before submitting
+        Selected Message im only 10
+        Report Category Something else
+        This person is too young to use Discord
+        Please follow our Community Guidelines
+        Submit Report
+        """,
+        has_visual_attachment=True,
+    )
+
+    assert assessment.should_alert is False
+    assert assessment.score < ALERT_THRESHOLD
+
+
+def test_selected_winner_scam_still_alerts():
+    assessment = assess_scam_text(
+        "You have been selected for a free Nitro prize. Claim it now.",
+        has_visual_attachment=True,
+    )
+
+    assert assessment.should_alert is True
+
+
 def test_mrbeast_free_money_page_ad_alerts_without_url():
     assessment = assess_scam_text(
         "Ad MRBEAST everyone that visits our page gets $500 You're eligible for free $500",
