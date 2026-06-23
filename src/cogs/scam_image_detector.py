@@ -21,6 +21,16 @@ log = logging.getLogger(__name__)
 
 DEFAULT_ENABLED_BOT_IDS = {1508281890820460604, 1464966749643341847}
 REVIEW_CHANNEL_ID = 1517350483646484480
+MODERATION_BYPASS_ROLE_IDS = {
+    1259554509559169159,
+    587392891220131860,
+    182222541857751040,
+    1201290738953093240,
+    1207394456584847461,
+    299005509065900045,
+    814369761030701058,
+    939015562619678781,
+}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".webm", ".m4v", ".mkv"}
 MAX_SCAN_BYTES = 8 * 1024 * 1024
@@ -104,7 +114,6 @@ GIVEAWAY_TERMS = (
     "free",
     "limited time",
     "congratulations",
-    "selected",
     "airdrop",
     "giving away",
     "give away",
@@ -137,7 +146,6 @@ WEAK_ACTION_TERMS = (
     "visit",
     "page",
     "continue",
-    "follow",
     "subscribe",
 )
 PARODY_TERMS = (
@@ -162,6 +170,21 @@ STOCK_MARKET_TERMS = (
     "portfolio",
     "shares",
     "ytd",
+)
+MODERATION_EVIDENCE_TERMS = (
+    "possible unsafe message detected",
+    "forwarded for human review",
+    "message deleted",
+    "jump to message",
+    "report summary",
+    "selected message",
+    "report category",
+    "submit report",
+)
+SELECTED_WINNER_RE = re.compile(
+    r"\b(?:you(?:'ve| have)?(?: been)?|you are|you were)\s+selected\b"
+    r"|\bselected\s+(?:winner|for\s+(?:a\s+)?(?:prize|reward|giveaway))\b",
+    re.IGNORECASE,
 )
 NSFW_CLASSES = {
     "ANUS_EXPOSED",
@@ -208,6 +231,10 @@ def contains_any(text: str, terms: Iterable[str]) -> bool:
     return any(contains_term(text, term) for term in terms)
 
 
+def has_moderation_bypass_role(member) -> bool:
+    return any(getattr(role, "id", None) in MODERATION_BYPASS_ROLE_IDS for role in getattr(member, "roles", []))
+
+
 def score_to_level(score: int) -> str:
     if score >= ALERT_THRESHOLD:
         return HIGH_RISK
@@ -239,7 +266,7 @@ def assess_scam_text(
     has_brand = contains_any(normalized, BRAND_TERMS)
     has_money = bool(MONEY_RE.search(normalized))
     has_hook = bool(HOOK_RE.search(normalized))
-    has_reward_language = contains_any(normalized, GIVEAWAY_TERMS)
+    has_reward_language = contains_any(normalized, GIVEAWAY_TERMS) or bool(SELECTED_WINNER_RE.search(normalized))
     has_giveaway = has_reward_language or has_money or has_hook
     has_strong_action = contains_any(normalized, STRONG_ACTION_TERMS)
     has_weak_action = contains_any(normalized, WEAK_ACTION_TERMS)
@@ -319,6 +346,11 @@ def assess_scam_text(
     ):
         score = min(score, REVIEW_THRESHOLD - 1)
         reasons.append("looks like stock market information without a solicitation")
+
+    moderation_evidence_signals = sum(contains_term(normalized, term) for term in MODERATION_EVIDENCE_TERMS)
+    if moderation_evidence_signals >= 2 and not nsfw_detections:
+        score = min(score, REVIEW_THRESHOLD - 1)
+        reasons.append("looks like a screenshot of moderation or report evidence")
 
     score = min(score, 100)
     if score < REVIEW_THRESHOLD and not reasons:
@@ -820,7 +852,11 @@ class ScamImageDetector(commands.Cog):
         if getattr(message, "guild", None) is None:
             return
 
-        if getattr(getattr(message, "author", None), "bot", False):
+        author = getattr(message, "author", None)
+        if getattr(author, "bot", False):
+            return
+
+        if has_moderation_bypass_role(author):
             return
 
         source_channel_id = getattr(getattr(message, "channel", None), "id", None)

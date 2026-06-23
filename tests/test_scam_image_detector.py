@@ -5,10 +5,12 @@ from unittest.mock import AsyncMock
 from cogs.scam_image_detector import (
     ALERT_THRESHOLD,
     DEFAULT_ENABLED_BOT_IDS,
+    MODERATION_BYPASS_ROLE_IDS,
     REVIEW_CHANNEL_ID,
     REVIEW_THRESHOLD,
     ScamImageDetector,
     assess_scam_text,
+    has_moderation_bypass_role,
     is_visual_attachment,
     is_visual_url,
     is_video_attachment,
@@ -99,6 +101,49 @@ def test_stock_price_screenshot_is_not_flagged():
     assert "asks users to claim, verify, log in, scan, or enter sensitive info" not in assessment.reasons
 
 
+def test_existing_moderation_alert_screenshot_is_not_flagged_again():
+    assessment = assess_scam_text(
+        """
+        Possible Unsafe Message Detected
+        This was forwarded for human review. The bot did not delete the original message.
+        Message Deleted
+        Jump to message
+        MrBeast giveaway claim your free prize and verify now
+        """,
+        has_visual_attachment=True,
+    )
+
+    assert assessment.should_alert is False
+    assert assessment.score < ALERT_THRESHOLD
+
+
+def test_discord_report_summary_screenshot_is_not_flagged():
+    assessment = assess_scam_text(
+        """
+        Report Summary
+        Review your report before submitting
+        Selected Message im only 10
+        Report Category Something else
+        This person is too young to use Discord
+        Please follow our Community Guidelines
+        Submit Report
+        """,
+        has_visual_attachment=True,
+    )
+
+    assert assessment.should_alert is False
+    assert assessment.score < ALERT_THRESHOLD
+
+
+def test_selected_winner_scam_still_alerts():
+    assessment = assess_scam_text(
+        "You have been selected for a free Nitro prize. Claim it now.",
+        has_visual_attachment=True,
+    )
+
+    assert assessment.should_alert is True
+
+
 def test_mrbeast_free_money_page_ad_alerts_without_url():
     assessment = assess_scam_text(
         "Ad MRBEAST everyone that visits our page gets $500 You're eligible for free $500",
@@ -149,6 +194,42 @@ def test_detector_can_be_forced_on_for_standalone_safety_bot():
     bot = SimpleNamespace(user=SimpleNamespace(id=123), scam_detector_always_enabled=True)
 
     assert ScamImageDetector(bot).is_enabled_for_current_bot()
+
+
+def test_moderation_bypass_roles_match_all_requested_ids():
+    assert MODERATION_BYPASS_ROLE_IDS == {
+        1259554509559169159,
+        587392891220131860,
+        182222541857751040,
+        1201290738953093240,
+        1207394456584847461,
+        299005509065900045,
+        814369761030701058,
+        939015562619678781,
+    }
+    member = SimpleNamespace(roles=[SimpleNamespace(id=1259554509559169159)])
+    assert has_moderation_bypass_role(member) is True
+
+
+def test_moderation_bypass_role_skips_scanning_and_forwarding():
+    review_channel = SimpleNamespace(id=REVIEW_CHANNEL_ID, send=AsyncMock())
+    bot = SimpleNamespace(user=SimpleNamespace(id=next(iter(DEFAULT_ENABLED_BOT_IDS))))
+    cog = ScamImageDetector(bot)
+    cog.assess_message = AsyncMock()
+    message = SimpleNamespace(
+        guild=SimpleNamespace(id=1),
+        author=SimpleNamespace(
+            id=111,
+            bot=False,
+            roles=[SimpleNamespace(id=1259554509559169159)],
+        ),
+        channel=SimpleNamespace(id=123),
+    )
+
+    asyncio.run(cog.on_message(message))
+
+    cog.assess_message.assert_not_awaited()
+    review_channel.send.assert_not_awaited()
 
 
 def test_on_message_forwards_alert_without_ping_or_deletion():
