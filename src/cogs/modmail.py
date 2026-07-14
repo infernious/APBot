@@ -1,7 +1,7 @@
 import asyncio
 from collections import deque
 from datetime import datetime as dt
-from typing import List
+from typing import List, Optional
 import time  # <-- added for deduplication
 
 from uuid import uuid4
@@ -105,6 +105,96 @@ class Modmail(commands.Cog):
     def _has_required_role(self, inter: Interaction) -> bool:
         return any(role.name in REQUIRED_ROLES for role in inter.user.roles)
 
+    async def _get_modmail_access_denial(
+        self,
+        user: User,
+    ) -> Optional[Embed]:
+        """Return an error embed when a user cannot access modmail.
+
+        Check order:
+        1. Server ban
+        2. Modmail ban
+        3. Current AP Students membership
+        """
+
+        guild = self.bot.get_guild(self.bot.config.get("guild_id"))
+        if guild is None:
+            return Embed(
+                title="Modmail Unavailable",
+                description="Modmail is temporarily unavailable. Please try again later.",
+                color=self.bot.colors["red"],
+            )
+
+        # Check the server ban first. Banned users are no longer guild members,
+        # so this must happen before the membership check.
+        try:
+            await guild.fetch_ban(user)
+            return Embed(
+                title="Modmail Restricted",
+                description="You are banned from AP Students and cannot use modmail.",
+                color=self.bot.colors["red"],
+            )
+        except nextcord.NotFound:
+            pass
+        except (nextcord.Forbidden, nextcord.HTTPException) as error:
+            print(
+                f"Could not check server ban status for {user.id}: {error}"
+            )
+            return Embed(
+                title="Modmail Unavailable",
+                description="Modmail is temporarily unavailable. Please try again later.",
+                color=self.bot.colors["red"],
+            )
+
+        # Keep the existing separate modmail-ban system.
+        try:
+            banned_users = await self.bot.db.modmail.get_banned_users()
+        except Exception as error:
+            print(
+                f"Could not check modmail ban status for {user.id}: {error}"
+            )
+            return Embed(
+                title="Modmail Unavailable",
+                description="Modmail is temporarily unavailable. Please try again later.",
+                color=self.bot.colors["red"],
+            )
+
+        if user.id in banned_users:
+            return Embed(
+                title="Modmail Restricted",
+                description="You are banned from using modmail.",
+                color=self.bot.colors["red"],
+            )
+
+        # Use the cache first, then fetch directly so this works reliably in a
+        # large server where every member may not be cached.
+        member = guild.get_member(user.id)
+        if member is None:
+            try:
+                await guild.fetch_member(user.id)
+            except nextcord.NotFound:
+                return Embed(
+                    title="Server Membership Required",
+                    description=(
+                        "You must be a member of AP Students to use modmail. "
+                        "Join the server, then try again."
+                    ),
+                    color=self.bot.colors["orange"],
+                )
+            except (nextcord.Forbidden, nextcord.HTTPException) as error:
+                print(
+                    f"Could not check server membership for {user.id}: {error}"
+                )
+                return Embed(
+                    title="Modmail Unavailable",
+                    description=(
+                        "Modmail is temporarily unavailable. Please try again later."
+                    ),
+                    color=self.bot.colors["red"],
+                )
+
+        return None
+
     async def notify_user(self, user_id: int, message: str, attachment_url: str = None) -> None:
         user = await self.bot.getch_user(user_id)
         if not user:
@@ -201,15 +291,9 @@ class Modmail(commands.Cog):
         self._recent_messages.append((msg_key, now))
 
         try:
-            banned_users = await self.bot.db.modmail.get_banned_users()
-            if message.author.id in banned_users:
-                await message.author.send(
-                    embed=Embed(
-                        title="Modmail Restricted",
-                        description="You are banned from using modmail.",
-                        color=self.bot.colors["red"],
-                    )
-                )
+            denial_embed = await self._get_modmail_access_denial(message.author)
+            if denial_embed is not None:
+                await message.author.send(embed=denial_embed)
                 return
 
             async def forward_message():
@@ -291,6 +375,12 @@ class Modmail(commands.Cog):
     # ============================================================
     async def trigger_emergency(self, user: User):
         """Handles notifying all moderators of an emergency alert in the user's modmail thread."""
+
+        denial_embed = await self._get_modmail_access_denial(user)
+        if denial_embed is not None:
+            await user.send(embed=denial_embed)
+            return
+
         guild = self.bot.get_guild(self.bot.config.get("guild_id"))
         if not guild:
             await user.send("Could not find the guild configuration. Please contact an admin.")
@@ -429,18 +519,9 @@ class Modmail(commands.Cog):
         if inter.guild:
             return await inter.send("This command can only be used in DMs.", ephemeral=True) 
         
-        guild = self.bot.get_guild(self.bot.config.get("guild_id"))
-        if guild:
-            try:
-                await guild.fetch_ban(inter.user)
-                return await inter.send(
-                    "You are banned from the server and cannot use this command.",
-                    ephemeral=True
-                )
-            except nextcord.NotFound:
-                pass  # not banned
-            except nextcord.Forbidden:
-                pass  # missing perms, fail open
+        denial_embed = await self._get_modmail_access_denial(inter.user)
+        if denial_embed is not None:
+            return await inter.send(embed=denial_embed, ephemeral=True)
 
         allowed, reason = await self.bot.db.emergency.can_use(inter.user.id, self.bot.db)
         if not allowed:
