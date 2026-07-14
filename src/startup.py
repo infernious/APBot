@@ -25,6 +25,7 @@ DEFAULT_COGS = [
    # "cogs.exams_automation.day_zero_complete",
     "cogs.delete_log",
    # "cogs.leak_log",
+    "cogs.media_leveling",
 ]
 
 
