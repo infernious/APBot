@@ -8,6 +8,7 @@
   "study_role_id": 1,
   "bot_staff_role_id": 1,
   "decay_logs_channel": 1,
+  "pfp_logs_channel": 1,
   "event_coordinator_role_id": 1,
   "appeals_channel_id": 1,
   "special_perms_role_id": 1,
