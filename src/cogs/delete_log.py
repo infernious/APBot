@@ -10,9 +10,8 @@ import nextcord
 from nextcord.ext import commands
 
 from bot_base import APBot
+from cogs.server_log.base import resolve_log_channel
 
-
-LOG_CHANNEL_NAME = "server-log"
 
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".bmp")
 GIF_EXTENSIONS = (".gif",)
@@ -37,8 +36,9 @@ class DeleteLog(commands.Cog):
         self.poll_cache: dict[int, dict[str, Any]] = {}
 
     def get_log_channel(self, guild: nextcord.Guild) -> Optional[nextcord.TextChannel]:
-        channel = nextcord.utils.get(guild.text_channels, name=LOG_CHANNEL_NAME)
-        return channel if isinstance(channel, nextcord.TextChannel) else None
+        # Shared with the cogs.server_log cogs so `server_log_channel_id` moves
+        # every server log at once, falling back to the `server-log` channel.
+        return resolve_log_channel(self.bot, guild)
 
     def clip(self, text: str, limit: int) -> str:
         if len(text) <= limit:

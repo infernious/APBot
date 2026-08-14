@@ -27,6 +27,12 @@ DEFAULT_COGS = [
     "cogs.delete_log",
    # "cogs.leak_log",
     "cogs.media_leveling",
+    "cogs.server_log.member_events",
+    "cogs.server_log.role_events",
+    "cogs.server_log.channel_events",
+    "cogs.server_log.emoji_events",
+    "cogs.server_log.invite_events",
+    "cogs.server_log.mod_command_events",
 ]
 
 
