@@ -35,7 +35,6 @@ class APBot(commands.Bot):
                               'cogs.rolereact',
                               'cogs.study',
                               'cogs.exams_automation.day_zero_complete',
-                              'cogs.topic'
                               # 'cogs.threads',
                               ]
         for extension in initial_extensions:
