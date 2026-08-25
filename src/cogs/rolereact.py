@@ -336,6 +336,19 @@ class MathCS(nextcord.ui.View):
             await member.add_roles(role)
             await interaction.response.send_message(f"`{role.name}` role added!", ephemeral=True)
 
+    @nextcord.ui.button(label='Cybersecurity', style=nextcord.ButtonStyle.grey, custom_id='Cybersecurity',
+                       emoji='🔐', row=3)
+    async def cybersecurity(self, button: nextcord.ui.Button, interaction: nextcord.Interaction):
+        role = nextcord.utils.get(interaction.guild.roles, name="AP Cybersecurity")
+        member = interaction.guild.get_member(interaction.user.id)
+
+        if role in member.roles:
+            await member.remove_roles(role)
+            await interaction.response.send_message(f"`{role.name}` role removed!", ephemeral=True)
+        else:
+            await member.add_roles(role)
+            await interaction.response.send_message(f"`{role.name}` role added!", ephemeral=True)
+
 
 class Sciences(nextcord.ui.View):
     def __init__(self, bot):
@@ -453,7 +466,7 @@ class SocialStudies(nextcord.ui.View):
             await interaction.response.send_message(f"`{role.name}` role added!", ephemeral=True)
 
     @nextcord.ui.button(label='World M', style=nextcord.ButtonStyle.grey, custom_id='World M',
-                       emoji='🌍', row=1)
+                       emoji='🌍', row=0)
     async def worldm(self, button: nextcord.ui.Button, interaction: nextcord.Interaction):
         role = nextcord.utils.get(interaction.guild.roles, name="AP World History: Modern")
         member = interaction.guild.get_member(interaction.user.id)
@@ -466,7 +479,7 @@ class SocialStudies(nextcord.ui.View):
             await interaction.response.send_message(f"`{role.name}` role added!", ephemeral=True)
 
     @nextcord.ui.button(label='Human Geo', style=nextcord.ButtonStyle.grey, custom_id='Human Geo',
-                       emoji='🗺️', row=2)
+                       emoji='🗺️', row=1)
     async def humangeo(self, button: nextcord.ui.Button, interaction: nextcord.Interaction):
         role = nextcord.utils.get(interaction.guild.roles, name="AP Human Geo")
         member = interaction.guild.get_member(interaction.user.id)
@@ -505,7 +518,7 @@ class SocialStudies(nextcord.ui.View):
             await interaction.response.send_message(f"`{role.name}` role added!", ephemeral=True)
 
     @nextcord.ui.button(label='Micro', style=nextcord.ButtonStyle.grey, custom_id='Micro',
-                       emoji='📉', row=2)
+                       emoji='📉', row=1)
     async def micro(self, button: nextcord.ui.Button, interaction: nextcord.Interaction):
         role = nextcord.utils.get(interaction.guild.roles, name="AP Micro")
         member = interaction.guild.get_member(interaction.user.id)
@@ -547,6 +560,19 @@ class SocialStudies(nextcord.ui.View):
                        emoji='📈', row=2)
     async def macro(self, button: nextcord.ui.Button, interaction: nextcord.Interaction):
         role = nextcord.utils.get(interaction.guild.roles, name="AP Macro")
+        member = interaction.guild.get_member(interaction.user.id)
+
+        if role in member.roles:
+            await member.remove_roles(role)
+            await interaction.response.send_message(f"`{role.name}` role removed!", ephemeral=True)
+        else:
+            await member.add_roles(role)
+            await interaction.response.send_message(f"`{role.name}` role added!", ephemeral=True)
+
+    @nextcord.ui.button(label='Business PF', style=nextcord.ButtonStyle.grey, custom_id='Business PF',
+                       emoji='💼', row=2)
+    async def businesspf(self, button: nextcord.ui.Button, interaction: nextcord.Interaction):
+        role = nextcord.utils.get(interaction.guild.roles, name="AP Business with Personal Finance")
         member = interaction.guild.get_member(interaction.user.id)
 
         if role in member.roles:
@@ -1115,7 +1141,7 @@ class RoleReact(commands.Cog):
             Languages(self.bot))
 
         await self._post_panel(interaction, "Welcome to the server!", common_desc, nextcord.Color.from_rgb(72, 209, 204),
-            "https://media.discordapp.net/attachments/787749899160387674/1061800485859905636/Math_CS.png?ex=686bba83&is=686a6903&hm=4df997d29b400ba9a1fb3e88968b5ea891b8d8d40467ea4332e49abf2acc18c0&=&width=1439&height=890",
+            "https://cdn.discordapp.com/attachments/791130847461507093/1541614961111867424/content.png?ex=6a8e3c50&is=6a8cead0&hm=0d1a2e54a4d8a099b2fa8a773ef5d6cb2f5d302c1ec3f347bf34451ff8185f2e&",
             MathCS(self.bot))
 
         await self._post_panel(interaction, "Welcome to the server!", common_desc, nextcord.Color.from_rgb(144, 238, 144),
@@ -1123,7 +1149,7 @@ class RoleReact(commands.Cog):
             Sciences(self.bot))
 
         await self._post_panel(interaction, "Welcome to the server!", common_desc, nextcord.Color.from_rgb(255, 215, 0),
-            "https://media.discordapp.net/attachments/787749899160387674/1061800484400267335/Social_Studies.png?ex=686bba82&is=686a6902&hm=124b280d1e05222b600609b1608cbe48d37780897ce2e970d575d789294edd02&=&width=1439&height=890",
+            "https://cdn.discordapp.com/attachments/791130847461507093/1541616060896387082/content.png?ex=6a8e3d56&is=6a8cebd6&hm=4c068e7fbc513e17ee3876bab49278e3efec66894b611656fcd8be2c26d72120&",
             SocialStudies(self.bot))
 
         await self._post_panel(interaction, "Welcome to the server!", common_desc, nextcord.Color.from_rgb(186, 85, 211),
