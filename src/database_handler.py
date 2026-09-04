@@ -299,7 +299,7 @@ class SingletonMeta(type):
 class BaseDatabase(metaclass=SingletonMeta):
     def __init__(self, conf=None):
         self.bot_user_id: int
-        self.database = database_client["ap-students"]
+        self.database = database_client["ap-test"]
         self.user_config = self.database["user_config"]
         self.bot_config = self.database["bot_config"]
         self.ban_appeals = self.database["ban_appeals"]
@@ -353,6 +353,104 @@ class BaseDatabase(metaclass=SingletonMeta):
         except Exception as e:
             # Log any errors that occur during the update
             print(f"Error updating user config for user_id {user_id}: {e}")
+
+    async def delete_all_user_data(self, user_id: int) -> dict[str, int]:
+        """Permanently remove MongoDB data directly linked to a Discord user.
+
+        This intentionally does not touch Discord messages, native bans,
+        timeouts, roles, or audit logs. References to the requester acting as a
+        moderator are anonymized so deleting one moderator does not erase
+        another member's moderation record.
+        """
+        user_ids = [user_id, str(user_id)]
+        collections = {
+            "user_config": self.user_config,
+            "reminders": self.reminders,
+            "ban_appeals": self.ban_appeals,
+            "tags": self.tags,
+            "emergency_usage": self.database["emergency_usage"],
+            "temporary_restrictions": self.database["temporary_restrictions"],
+            "media_levels": self.database["media_levels"],
+            # Keep this cleanup even if the Wordle feature is later disabled so
+            # legacy records can still be erased.
+            "wordle_results": self.database["wordle_results"],
+        }
+
+        deleted: dict[str, int] = {}
+        for name, collection in collections.items():
+            result = await collection.delete_many({"user_id": {"$in": user_ids}})
+            deleted[name] = result.deleted_count
+
+        channel_result = await self.database["channel_config"].delete_many(
+            {"modmail_user_id": {"$in": user_ids}}
+        )
+        deleted["modmail_mappings"] = channel_result.deleted_count
+
+        modmail_result = await self.bot_config.update_one(
+            {"name": "modmail"},
+            {"$pull": {"banned_users": {"$in": user_ids}}},
+        )
+        deleted["modmail_block_entries"] = modmail_result.modified_count
+
+        restriction_result = await self.database["temporary_restrictions"].update_many(
+            {"moderator_id": {"$in": user_ids}},
+            {"$set": {"moderator_id": None}},
+        )
+        deleted["restriction_moderator_references_anonymized"] = (
+            restriction_result.modified_count
+        )
+
+        deleted["infraction_moderator_references_anonymized"] = (
+            await self._anonymize_infraction_moderator_references(user_id)
+        )
+        return deleted
+
+    async def _anonymize_infraction_moderator_references(self, user_id: int) -> int:
+        """Remove a moderator's ID from other users' infraction histories."""
+        changed_documents = 0
+        cursor = self.user_config.find(
+            {
+                "$or": [
+                    {"infractions.moderator": {"$in": [user_id, str(user_id)]}},
+                    {"infractions.update.moderator": {"$in": [user_id, str(user_id)]}},
+                ]
+            }
+        )
+
+        async for document in cursor:
+            changed = False
+            for infraction in document.get("infractions", []):
+                if not isinstance(infraction, dict):
+                    continue
+
+                if first_snowflake(infraction.get("moderator")) == user_id:
+                    infraction["moderator"] = 0
+                    changed = True
+
+                updates = infraction.get("update")
+                if isinstance(updates, dict):
+                    updates = [updates]
+                    infraction["update"] = updates
+
+                if not isinstance(updates, list):
+                    continue
+
+                for update in updates:
+                    if (
+                        isinstance(update, dict)
+                        and first_snowflake(update.get("moderator")) == user_id
+                    ):
+                        update["moderator"] = 0
+                        changed = True
+
+            if changed:
+                await self.user_config.replace_one(
+                    {"_id": document["_id"]},
+                    document,
+                )
+                changed_documents += 1
+
+        return changed_documents
             
     async def add_infraction(self, user_id: int, infraction: Infraction):
         user_config = await self.read_user_config(user_id)
