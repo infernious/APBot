@@ -23,8 +23,10 @@ def has_data_deletion_role(member) -> bool:
 
 def parse_discord_user_id(value: str) -> int | None:
     value = str(value or "").strip()
+
     if not value.isdigit() or not 17 <= len(value) <= 20:
         return None
+
     return int(value)
 
 
@@ -57,6 +59,7 @@ class PrivacyCommands(commands.Cog):
             return
 
         target_id = parse_discord_user_id(user_id)
+
         if target_id is None:
             await inter.response.send_message(
                 "Enter a valid 17-20 digit Discord user ID.",
@@ -71,46 +74,31 @@ class PrivacyCommands(commands.Cog):
             )
             return
 
-        await inter.response.defer(ephemeral=True)
+        # No ephemeral=True, so the result will be visible to everyone.
+        await inter.response.defer()
 
         try:
-            results = await self.bot.db.base_db.delete_all_user_data(target_id)
+            await self.bot.db.base_db.delete_all_user_data(target_id)
         except Exception as exc:
-            await inter.followup.send(
-                f"Data deletion failed: `{type(exc).__name__}`. No completion was certified.",
-                ephemeral=True,
+            print(
+                f"Failed to delete user data for {target_id}: "
+                f"{type(exc).__name__}: {exc}"
             )
-            raise
-
-        total_deleted = sum(
-            count
-            for name, count in results.items()
-            if "anonymized" not in name
-        )
-        total_anonymized = sum(
-            count
-            for name, count in results.items()
-            if "anonymized" in name
-        )
-        details = "\n".join(
-            f"- `{name}`: {count}"
-            for name, count in results.items()
-            if count
-        ) or "- No matching MongoDB records were found."
+            await inter.followup.send(
+                "Failed to delete the user's data. Check the console for the error."
+            )
+            return
 
         embed = nextcord.Embed(
             title="APBot database deletion complete",
             description=(
-                f"Deleted MongoDB data linked to user ID `{target_id}`.\n\n"
-                f"**Records removed:** {total_deleted}\n"
-                f"**Documents with moderator references anonymized:** {total_anonymized}\n\n"
-                f"{details}\n\n"
-                "This command does not delete Discord channel messages, audit logs, "
-                "native bans, timeouts, or roles."
+                f"Deleted MongoDB data linked to user ID `{target_id}`."
             ),
             color=nextcord.Color.green(),
         )
-        await inter.followup.send(embed=embed, ephemeral=True)
+
+        # No ephemeral=True, so everyone can see this embed.
+        await inter.followup.send(embed=embed)
 
 
 def setup(bot: APBot) -> None:
