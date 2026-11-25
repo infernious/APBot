@@ -31,10 +31,30 @@ REAPPEAL_DELAY_SECONDS = 60 * 60 * 24 * 84  # 12 weeks
 
 
 async def generic_decide(bot: APBot, user_id: int, message_id: int):
+    # Share the lock across scheduled callbacks and cog reloads.
+    lock = getattr(bot, "_appeal_decision_lock", None)
+    if lock is None:
+        lock = bot._appeal_decision_lock = asyncio.Lock()
+    async with lock:
+        await _decide_pending_appeal(bot, user_id, message_id)
+
+
+async def _decide_pending_appeal(bot: APBot, user_id: int, message_id: int):
+    pending = await bot.db.appeal.get_pending_decision(user_id)
+    if not pending or pending["message_id"] != message_id:
+        return
+
+    remaining = pending["submission_time"] + REVIEW_DELAY_SECONDS - time.time()
+    if remaining > 0:
+        bot.loop.call_later(
+            remaining,
+            lambda: asyncio.create_task(generic_decide(bot, user_id, message_id)),
+        )
+        return
+
     appeal_message: Optional[Message] = await bot.getch_message(
         bot.config.get("appeals_channel_id"), message_id
     )
-
     if appeal_message is None:
         print(
             f"[Appeal] Message {message_id} not found for user {user_id}. "
@@ -48,7 +68,6 @@ async def generic_decide(bot: APBot, user_id: int, message_id: int):
 
     maintain_ban_reactions = 0
     unban_reactions = 0
-
     for reaction in appeal_message.reactions:
         if str(reaction.emoji) == "🟢":
             unban_reactions = reaction.count
@@ -56,8 +75,7 @@ async def generic_decide(bot: APBot, user_id: int, message_id: int):
             maintain_ban_reactions = reaction.count
 
     decision_embed = Embed(title="")
-    user = await bot.getch_user(user_id)
-    appeal_result = None
+    notification = None
 
     main_guild = bot.get_guild(int(bot.config.get("guild_id")))
     if not main_guild:
@@ -67,40 +85,40 @@ async def generic_decide(bot: APBot, user_id: int, message_id: int):
     if unban_reactions > maintain_ban_reactions:
         try:
             await main_guild.unban(Object(id=user_id))
-            decision_embed.color = bot.colors["green"]
-            decision_embed.add_field(name="", value="Member will be unbanned!")
-            appeal_result = True
-        except errors.NotFound:
+        except errors.NotFound as e:
+            if e.code != 10026:  # Discord: Unknown Ban
+                raise
             decision_embed.color = bot.colors["orange"]
             decision_embed.add_field(name="", value="Member is already unbanned!")
-
-        if user is not None:
-            try:
-                await user.send(
-                    embed=Embed(
-                        title="Ban Lifted.",
-                        description="You have been unbanned from AP Students! Welcome back :)",
-                        color=bot.colors["green"],
-                    )
-                )
-            except Exception:
-                pass
+        else:
+            decision_embed.color = bot.colors["green"]
+            decision_embed.add_field(name="", value="Member will be unbanned!")
+            notification = Embed(
+                title="Ban Lifted.",
+                description="You have been unbanned from AP Students! Welcome back :)",
+                color=bot.colors["green"],
+            )
+        appeal_result = True
     else:
         decision_embed.color = bot.colors["red"]
         decision_embed.add_field(name="", value="Member will remain banned.")
         appeal_result = False
+        notification = Embed(
+            title="Ban Appeal Denied.",
+            description="Your appeal was reviewed and denied. You may appeal again after 12 weeks.",
+            color=bot.colors["red"],
+        )
 
-        if user is not None:
-            try:
-                await user.send(
-                    embed=Embed(
-                        title="Ban Appeal Denied.",
-                        description="Your appeal was reviewed and denied. You may appeal again after 12 weeks.",
-                        color=bot.colors["red"],
-                    )
-                )
-            except Exception:
-                pass
+    # Finalize before sending notifications or updating the staff thread.
+    await bot.db.appeal.set_last_appeal(user_id, time.time(), appeal_result)
+
+    if notification is not None:
+        try:
+            user = await bot.getch_user(user_id)
+            if user is not None:
+                await user.send(embed=notification)
+        except Exception as e:
+            print(f"[Appeal] Failed to notify user {user_id}: {e}")
 
     if appeal_message.thread is not None:
         try:
@@ -110,8 +128,6 @@ async def generic_decide(bot: APBot, user_id: int, message_id: int):
             print(f"[Appeal] Failed to update thread for message {message_id}: {e}")
     else:
         print(f"[Appeal] No thread found for appeal message {message_id}.")
-
-    await bot.db.appeal.set_last_appeal(user_id, time.time(), appeal_result)
 
 
 class BanAppealModal(ui.Modal):
