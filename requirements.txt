@@ -6,3 +6,4 @@ python-dotenv
 pytest
 nudenet>=3.4.2
 rapidocr-onnxruntime>=1.4.4
+sympy==1.14.0
