@@ -1,4 +1,5 @@
 import asyncio
+import re
 from collections import deque
 from datetime import datetime as dt
 from typing import List, Optional
@@ -40,13 +41,14 @@ MAIN_MOD =  {"Moderator"}
 # ============================================================
 
 class ConfirmView(View):
-    def __init__(self, author: User, on_confirm, on_cancel=None, post_confirm_note=None):
+    def __init__(self, author: User, on_confirm, on_cancel=None, post_confirm_note=None, verify_delivery=False):
         super().__init__(timeout=60)
         self.author = author
         self.on_confirm = on_confirm
         self.on_cancel = on_cancel
         self.message = None
         self.post_confirm_note = post_confirm_note  # Optional text to send AFTER confirmation
+        self.verify_delivery = verify_delivery
 
     async def interaction_check(self, interaction: Interaction) -> bool:
         if interaction.user != self.author:
@@ -59,6 +61,27 @@ class ConfirmView(View):
     @button(label="Confirm", style=ButtonStyle.green)
     async def confirm(self, button, interaction: Interaction):
         embed = interaction.message.embeds[0]
+        if self.verify_delivery:
+            # Acknowledge first, then report success only after forwarding.
+            embed.title = "Sending..."
+            embed.set_footer(text="Forwarding your message to the mods.")
+            await interaction.response.edit_message(embed=embed, view=None)
+            try:
+                await self.on_confirm()
+            except Exception as error:
+                print(f"[Modmail] Message forwarding failed: {error}")
+                embed.color = 0xED4245
+                embed.title = "Message not sent"
+                embed.set_footer(text="Please try again or contact a moderator.")
+            else:
+                embed.color = 0x57F287
+                embed.title = "Confirmed"
+                embed.set_footer(text="Message sent successfully.")
+            self.stop()
+            await interaction.message.edit(embed=embed, view=None)
+            if embed.title == "Confirmed" and self.post_confirm_note:
+                await interaction.followup.send(self.post_confirm_note, ephemeral=True)
+            return
         embed.color = 0x57F287
         embed.title = "Confirmed"
         embed.set_footer(text="Message sent successfully.")
@@ -195,10 +218,154 @@ class Modmail(commands.Cog):
 
         return None
 
+    @staticmethod
+    def _modmail_title_user_id(name: str) -> Optional[int]:
+        # v3.1: MODMAIL ---- username [id]; v3.0: username#0: id
+        match = re.fullmatch(r"MODMAIL\s+-+\s+.+\s+\[(\d{17,20})\]", name)
+        if match is None:
+            match = re.fullmatch(r".+?:\s*(\d{17,20})", name)
+        return int(match.group(1)) if match else None
+
+    def _modmail_thread_name(self, user: User) -> str:
+        return f"MODMAIL ------------------------------ {user.name} [{user.id}]"
+
+    def _modmail_lock(self):
+        # Shared by the listener, staff replies and thread reopen events.
+        lock = getattr(self.bot, "_modmail_thread_lock", None)
+        if lock is None:
+            lock = self.bot._modmail_thread_lock = asyncio.Lock()
+        return lock
+
+    def _is_modmail_thread(self, thread) -> bool:
+        return (
+            isinstance(thread, Thread)
+            and thread.parent_id == int(self.bot.config.get("modmail_channel"))
+        )
+
+    async def _fetch_modmail_thread(self, thread_id: int):
+        # Archived posts may not be cached. Only an actual Unknown Channel
+        # response means the post is gone; permission/API failures must surface.
+        try:
+            thread = await self.bot.fetch_channel(int(thread_id))
+        except nextcord.NotFound as error:
+            if error.code == 10003:
+                return None
+            raise
+        if not self._is_modmail_thread(thread):
+            raise RuntimeError("Stored modmail ID is not a thread in the modmail forum.")
+        return thread
+
+    async def _repair_modmail_thread(self, thread, user_id: int, user=None, reopen=False):
+        if not self._is_modmail_thread(thread):
+            raise RuntimeError("Not a modmail forum thread.")
+        db = self.bot.db.modmail
+        reverse = await db.get_user(thread.id)
+        owners = await db.user_config.find(
+            {"modmail_id": thread.id}, {"user_id": 1}
+        ).to_list(length=None)
+        if any(d.get("user_id") != user_id for d in owners):
+            raise RuntimeError("Another user is mapped to this modmail thread.")
+        title_id = self._modmail_title_user_id(thread.name)
+        if reverse is not None and int(reverse) != user_id:
+            raise RuntimeError("Modmail thread is mapped to a different user.")
+        if title_id is not None and title_id != user_id:
+            raise RuntimeError("Modmail title identifies a different user.")
+        forward = await db.get_channel(user_id)
+        if forward is not None and int(forward) != thread.id:
+            other = await self._fetch_modmail_thread(forward)
+            if other is not None:
+                raise RuntimeError("User has another existing modmail thread; staff review required.")
+        if reopen and thread.archived:
+            if thread.locked:
+                raise RuntimeError("Modmail thread is locked; staff must reopen it.")
+            thread = await thread.edit(archived=False)
+        if reverse is None:
+            await db.set_user(thread.id, user_id)
+        if forward is None or int(forward) != thread.id:
+            await db.set_channel(user_id, thread.id)
+        if user is not None and not thread.archived:
+            expected = self._modmail_thread_name(user)
+            if thread.name != expected:
+                try:
+                    thread = await thread.edit(name=expected)
+                except nextcord.HTTPException as error:
+                    # A title edit failure should not prevent a verified reply.
+                    print(f"[Modmail] Could not rename thread {thread.id}: {error}")
+        return thread
+
+    async def _resolve_modmail_thread_user(self, thread, explicit_user=None, reopen=True):
+        # Called with the lock held. Never route a DM if identity is ambiguous.
+        thread = await self._fetch_modmail_thread(thread.id)
+        if thread is None:
+            raise RuntimeError("Modmail thread no longer exists.")
+        reverse = await self.bot.db.modmail.get_user(thread.id)
+        title_id = self._modmail_title_user_id(thread.name)
+        owners = await self.bot.db.modmail.user_config.find(
+            {"modmail_id": thread.id}, {"user_id": 1}
+        ).to_list(length=None)
+        owner_ids = {d.get("user_id") for d in owners}
+        identities = owner_ids | {int(reverse) if reverse is not None else None, title_id}
+        identities.discard(None)
+        if len(identities) > 1:
+            raise RuntimeError("Conflicting modmail user identities; staff review required.")
+        user_id = next(iter(identities), None)
+        if user_id is None:
+            raise RuntimeError("Cannot identify the user from the database or thread title.")
+        if explicit_user is not None and explicit_user.id != user_id:
+            raise RuntimeError("Selected user does not match this modmail thread.")
+        user = explicit_user or await self.bot.fetch_user(user_id)
+        await self._repair_modmail_thread(thread, user_id, user=user, reopen=reopen)
+        return user
+
+    async def _get_user_modmail_thread(self, user: User, create=False):
+        async with self._modmail_lock():
+            db = self.bot.db.modmail
+            thread_id = await db.get_channel(user.id)
+            thread = await self._fetch_modmail_thread(thread_id) if thread_id else None
+            if thread is None:
+                # Recover the reverse mapping if the forward mapping was lost.
+                candidates = await db.channel_config.find(
+                    {"modmail_user_id": user.id}, {"channel_id": 1}
+                ).to_list(length=None)
+                existing = []
+                for candidate_id in {d.get("channel_id") for d in candidates if d.get("channel_id")}:
+                    candidate = await self._fetch_modmail_thread(candidate_id)
+                    if candidate is not None:
+                        existing.append(candidate)
+                if len(existing) > 1:
+                    raise RuntimeError("Multiple modmail threads found; staff review required.")
+                if existing:
+                    thread = existing[0]
+            if thread is None:
+                if not create:
+                    return None
+                forum = await self.bot.fetch_channel(int(self.bot.config.get("modmail_channel")))
+                if not isinstance(forum, ForumChannel):
+                    raise RuntimeError("Modmail forum is unavailable.")
+                created = await forum.create_thread(
+                    name=self._modmail_thread_name(user),
+                    content="Recreated deleted modmail thread." if thread_id else "New modmail started.",
+                    auto_archive_duration=1440,
+                )
+                thread = created if isinstance(created, Thread) else created.thread
+            return await self._repair_modmail_thread(thread, user.id, user=user, reopen=True)
+
+    @commands.Cog.listener()
+    async def on_thread_update(self, before: Thread, after: Thread):
+        # Lazy migration: repair legacy names when staff reopen an archived post.
+        if not before.archived or after.archived or not self._is_modmail_thread(after):
+            return
+        try:
+            async with self._modmail_lock():
+                await self._resolve_modmail_thread_user(after, reopen=False)
+        except Exception as error:
+            print(f"[Modmail] Could not reconcile reopened thread {after.id}: {error}")
+
+
     async def notify_user(self, user_id: int, message: str, attachment_url: str = None) -> None:
         user = await self.bot.getch_user(user_id)
         if not user:
-            return
+            raise RuntimeError("Modmail recipient could not be fetched.")
         embed = Embed(title="Message from the mods!", description=message, color=self.bot.colors["orange"])
         if attachment_url:
             embed.set_image(url=attachment_url)
@@ -222,23 +389,25 @@ class Modmail(commands.Cog):
         if not message and not attachment:
             return await inter.send("You must provide a message or attachment.", ephemeral=True)
 
-        if isinstance(inter.channel, Thread) and inter.channel.parent_id == self.bot.config.get("modmail_channel"):
-            user_id = await self.bot.db.modmail.get_user(inter.channel.id)
-            if not user_id:
-                try:
-                    user_id = int(inter.channel.name.split('[')[-1].rstrip(']'))
-                    await self.bot.db.modmail.set_user(inter.channel.id, user_id)
-                except (ValueError, IndexError, AttributeError):
-                    return await inter.send("Could not find the user associated with this thread.", ephemeral=True)
-        elif user:
-            user_id = user.id
-        else:
+        in_thread = self._is_modmail_thread(inter.channel)
+        if not in_thread and not user:
             return await inter.send("You must specify a user if not in a modmail thread.", ephemeral=True)
 
-        attachment_url = attachment.proxy_url if attachment else None
-        await self.notify_user(user_id, message, attachment_url)
-
-        recipient = await self.bot.getch_user(user_id)
+        await inter.response.defer()
+        try:
+            if in_thread:
+                async with self._modmail_lock():
+                    recipient = await self._resolve_modmail_thread_user(inter.channel, user)
+            else:
+                recipient = user
+            attachment_url = attachment.proxy_url if attachment else None
+            await self.notify_user(recipient.id, message, attachment_url)
+        except Exception as error:
+            print(f"[Modmail] Staff reply failed: {error}")
+            return await inter.followup.send(
+                "Could not send modmail. Check the thread/user mapping or bot logs.",
+                ephemeral=True,
+            )
 
         response_embed = Embed(
             title=f"Message sent to {recipient}",
@@ -248,7 +417,7 @@ class Modmail(commands.Cog):
         if attachment_url:
             response_embed.set_image(url=attachment_url)
 
-        await inter.response.send_message(embed=response_embed)
+        await inter.followup.send(embed=response_embed)
 
     @_mm.subcommand(name="ban", description="Ban a user from using modmail")
     async def _mm_ban(self, inter: Interaction, user: User):
@@ -297,28 +466,12 @@ class Modmail(commands.Cog):
                 return
 
             async def forward_message():
-                modmail_channel: ForumChannel = await self.bot.getch_channel(self.bot.config.get("modmail_channel"))
-                thread_id = await self.bot.db.modmail.get_channel(message.author.id)
-                expected_name = f"MODMAIL ------------------------------ {message.author.name} [{message.author.id}]"
-
-                if not thread_id:
-                    thread = await modmail_channel.create_thread(
-                        name=expected_name,
-                        content="New modmail started.",
-                        auto_archive_duration=1440,
-                    )
-                    await self.bot.db.modmail.set_channel(message.author.id, thread.id)
-                    await self.bot.db.modmail.set_user(thread.id, message.author.id)
-                else:
-                    thread = await self.bot.getch_channel(thread_id)
-                    if not isinstance(thread, Thread):
-                        thread = await modmail_channel.create_thread(
-                            name=expected_name,
-                            content="Recreated deleted modmail thread.",
-                            auto_archive_duration=1440,
-                        )
-                        await self.bot.db.modmail.set_channel(message.author.id, thread.id)
-                        await self.bot.db.modmail.set_user(thread.id, message.author.id)
+                # Recheck access at confirmation time, not just when the DM arrived.
+                denial = await self._get_modmail_access_denial(message.author)
+                if denial is not None:
+                    await message.author.send(embed=denial)
+                    raise RuntimeError("Modmail access denied at confirmation.")
+                thread = await self._get_user_modmail_thread(message.author, create=True)
 
                 message_text = message.content or "*No content*"
                 visual_mention = f"• {message.author.mention}"
@@ -352,6 +505,7 @@ class Modmail(commands.Cog):
                 on_confirm=forward_message,
                 on_cancel=cancel_action,
                 post_confirm_note=post_confirm_note,
+                verify_delivery=True,
             )
 
             msg_sent = await message.author.send(embed=confirm_embed, view=view)
@@ -391,15 +545,14 @@ class Modmail(commands.Cog):
             await user.send("Could not find a moderator role to ping.")
             return
 
-        # Get the user's modmail thread ID from DB
-        thread_id = await self.bot.db.modmail.get_channel(user.id)
-        if not thread_id:
-            await user.send("You don't have an active modmail thread. Please send a message first to start one.")
+        try:
+            thread = await self._get_user_modmail_thread(user, create=False)
+        except Exception as error:
+            print(f"[Modmail] Emergency thread lookup failed: {error}")
+            await user.send("Could not access your modmail thread. Please contact a moderator.")
             return
-
-        thread = await self.bot.getch_channel(thread_id)
-        if not isinstance(thread, Thread):
-            await user.send("Your modmail thread was deleted. Please send a new message to recreate it.")
+        if thread is None:
+            await user.send("You don't have an active modmail thread. Please send a message first to start one.")
             return
 
         # Build emergency embed
@@ -420,7 +573,7 @@ class Modmail(commands.Cog):
             await thread.send(content=mod_role.mention, embed=embed)
         except Exception as e:
             await user.send("Failed to send emergency alert. Please try again or contact an admin.")
-            print(f"Failed to send emergency in thread {thread_id}: {e}")
+            print(f"Failed to send emergency in thread {thread.id}: {e}")
             return
 
     # ============================================================
