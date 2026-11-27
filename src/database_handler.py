@@ -299,7 +299,10 @@ class SingletonMeta(type):
 class BaseDatabase(metaclass=SingletonMeta):
     def __init__(self, conf=None):
         self.bot_user_id: int
-        self.database = database_client["ap-students"]
+        database_name = os.getenv("APBOT_DATABASE_NAME", "ap-students")
+        if database_name not in ("ap-students", "ap-test"):
+            raise ValueError("Unsupported APBOT_DATABASE_NAME")
+        self.database = database_client[database_name]
         self.user_config = self.database["user_config"]
         self.bot_config = self.database["bot_config"]
         self.ban_appeals = self.database["ban_appeals"]

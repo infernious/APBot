@@ -277,32 +277,8 @@ class Infraction(commands.Cog):
 
         return False
 
-    @slash_command(
-        name="warnings",
-        description="Show infraction history of a member.",
-        guild_ids=COMMAND_GUILD_IDS,
-        default_member_permissions=Permissions(moderate_members=True),
-    )
-    async def warnings(self, inter: Interaction, member: Member):
-        if not self.has_mod_role(inter.user):
-            await inter.response.send_message(
-                "You do not have permission to use this command.", ephemeral=True
-            )
-            return
-
-        await inter.response.defer(with_message=True)
-
-        infractions = await self.bot.db.base_db.get_user_infractions(member.id)
-        inf_points = await self.bot.db.base_db.add_inf_points(member.id, 0)
-
-        fetching_msg = await inter.original_message()
-
-        if not infractions:
-            await fetching_msg.edit(content=f"{member.mention} has no infractions.")
-            return
-
-        await fetching_msg.edit(content=f"Fetching {member.mention}'s warnings...")
-
+    async def warning_embeds(self, guild, infractions, *, skip=0):
+        """Shared /warnings renderer, also used by staff appeal threads."""
         color_map = {
             "warn": self.bot.colors.get("yellow", Color.yellow()),
             "mute": self.bot.colors.get("orange", Color.orange()),
@@ -318,11 +294,13 @@ class Infraction(commands.Cog):
         total = len(infractions)
 
         for index, inf in enumerate(infractions, start=1):
+            if index <= skip:
+                continue
             action = format_action_name(inf.actiontype)
             reason = clip_text(inf.reason or "No reason provided", 1400)
 
             raw_mod = getattr(inf, "moderator", None)
-            mod, moderator_id = await self.resolve_moderator(inter.guild, raw_mod)
+            mod, moderator_id = await self.resolve_moderator(guild, raw_mod)
             mod_line = self.format_moderator(raw_mod, mod, moderator_id)
 
             time_val = getattr(inf, "actiontime", None)
@@ -363,9 +341,57 @@ class Infraction(commands.Cog):
                 color=color_map.get(getattr(inf, "actiontype", ""), Color.gold()),
             )
 
+            embed.description = clip_text(embed.description, 4096)
             if can_embed_image(attachment_url):
                 embed.set_image(url=attachment_url)
 
+            yield embed
+
+    async def post_appeal_warnings(self, thread, user_id, guild):
+        """Post existing warnings format without creating a slash interaction or pinging users."""
+        infractions = await self.bot.db.base_db.get_user_infractions(user_id)
+        points = await self.bot.db.base_db.get_inf_points(user_id)
+        points_text = str(points) if points is not None else "unavailable"
+        # Bound automatic output; /warnings remains available for the complete history.
+        skip = max(0, len(infractions) - 50)
+        summary = f"<@{user_id}> has `{points_text}` infraction point(s)."
+        if not infractions:
+            summary += " No recorded infractions."
+        elif skip:
+            summary += f" Showing the latest 50 of {len(infractions)} infractions. Use /warnings for the full history."
+        else:
+            summary += f" Showing all {len(infractions)} recorded infraction(s)."
+        await thread.send(summary, allowed_mentions=nextcord.AllowedMentions.none())
+        async for embed in self.warning_embeds(guild, infractions, skip=skip):
+            await thread.send(embed=embed, allowed_mentions=nextcord.AllowedMentions.none())
+
+    @slash_command(
+        name="warnings",
+        description="Show infraction history of a member.",
+        guild_ids=COMMAND_GUILD_IDS,
+        default_member_permissions=Permissions(moderate_members=True),
+    )
+    async def warnings(self, inter: Interaction, member: Member):
+        if not self.has_mod_role(inter.user):
+            await inter.response.send_message(
+                "You do not have permission to use this command.", ephemeral=True
+            )
+            return
+
+        await inter.response.defer(with_message=True)
+
+        infractions = await self.bot.db.base_db.get_user_infractions(member.id)
+        inf_points = await self.bot.db.base_db.add_inf_points(member.id, 0)
+
+        fetching_msg = await inter.original_message()
+
+        if not infractions:
+            await fetching_msg.edit(content=f"{member.mention} has no infractions.")
+            return
+
+        await fetching_msg.edit(content=f"Fetching {member.mention}'s warnings...")
+
+        async for embed in self.warning_embeds(inter.guild, infractions):
             await inter.channel.send(embed=embed)
 
         await fetching_msg.edit(
