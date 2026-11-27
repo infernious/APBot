@@ -10,6 +10,7 @@ DEFAULT_COGS = [
     "cogs.tags",
     "cogs.wordle",
     "cogs.counting",
+    "cogs.welcome",
     "cogs.scam_image_detector",
     "cogs.study",
     "cogs.helper_dm",
