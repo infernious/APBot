@@ -185,9 +185,9 @@ class AppealService:
             emb.add_field(name="User Info", value=f"User: {clean(inter.user, 100)}\nID: {uid}", inline=False)
             emb.add_field(name="Ban Appeal", value=appeal_code_block(appeal, 750), inline=False)
             if media.strip():
-                emb.add_field(name="Supporting Media", value=clean(media, 150), inline=False)
+                emb.add_field(name="Supporting Media", value=appeal_code_block(media, 150), inline=False)
             if misc.strip():
-                emb.add_field(name="Additional Information", value=clean(misc, 750), inline=False)
+                emb.add_field(name="Additional Information", value=appeal_code_block(misc, 750), inline=False)
             emb.add_field(name="Decision deadline", value=f"<t:{int(snapshot['deadline_at'])}:F> (<t:{int(snapshot['deadline_at'])}:R>)", inline=False)
             message = await channel.send(embed=emb, allowed_mentions=none_mentions())
             try:

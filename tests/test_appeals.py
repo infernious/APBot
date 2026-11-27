@@ -335,7 +335,8 @@ def test_original_appeal_body_style_only(mod,monkeypatch):
     assert emb.title=='Ban Appeal' and emb.color==3
     assert [f['name'] for f in emb.fields]==['User Info','Ban Appeal','Supporting Media','Additional Information','Decision deadline']
     assert emb.fields[1]['value']=='```\nMy original appeal\n**text**\n```'
-    assert emb.fields[2]['value']=='https://example.com' and emb.fields[3]['value']=='Other details'
+    assert emb.fields[2]['value']=='```\nhttps://example.com\n```'
+    assert emb.fields[3]['value']=='```\nOther details\n```'
     assert '<t:1000:F>' in emb.fields[4]['value'] and r['deadline_at']==1000
 
 
