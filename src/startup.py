@@ -12,6 +12,7 @@ DEFAULT_COGS = [
     "cogs.counting",
     "cogs.welcome",
     "cogs.scam_image_detector",
+    "cogs.honeypot",
     "cogs.study",
     "cogs.helper_dm",
     "cogs.events",

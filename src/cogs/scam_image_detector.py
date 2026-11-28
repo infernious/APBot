@@ -1,913 +1,498 @@
+"""Targeted casino-scam moderation. One bounded queue, one local OCR process."""
 from __future__ import annotations
-
 import asyncio
+import hashlib
+from io import BytesIO
 import logging
 import os
-import re
-import tempfile
-from dataclasses import dataclass
-from io import BytesIO
 from pathlib import Path
-from typing import Iterable, Optional
+import struct
+import sys
+import time
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+from collections import OrderedDict
 
 import nextcord
 from nextcord.ext import commands
-
-from bot_base import APBot
-
+from utils.scam_rules import Match, classify_image_text, image_match, report_context
 
 log = logging.getLogger(__name__)
+# Local settings: change these here; restart the bot to apply.
+# Existing explicit config.json values override these defaults (remove those
+# keys if you prefer to control the detector entirely from this file).
+SCAM_DETECTOR_ENABLED = True
+SCAM_DETECTOR_DRY_RUN = True
+# Automatically enter review-only staff testing on the designated test bot.
+# This does not enable staff scanning on the production bot.
+SCAM_DETECTOR_TEST_MODE = True
+REVIEW_CHANNEL_NAME = "automod-bot"
+# Exact names, not substring matches; independent of server-specific role IDs.
+MODERATION_BYPASS_ROLE_NAMES = frozenset({
+    "admin", "moderator", "chat moderator", "lead moderator", "trial chat moderator",
+})
+# Evidence access is separate from punishment immunity.
+REVIEW_ACCESS_ROLE_NAMES = MODERATION_BYPASS_ROLE_NAMES | frozenset({
+    "bot staff", "senior bot staff",
+})
 
 
-DEFAULT_ENABLED_BOT_IDS = {1508281890820460604, 1464966749643341847}
-REVIEW_CHANNEL_ID = 1517350483646484480
-MODERATION_BYPASS_ROLE_IDS = {
-    1259554509559169159,
-    587392891220131860,
-    182222541857751040,
-    1201290738953093240,
-    1207394456584847461,
-    299005509065900045,
-    814369761030701058,
-    939015562619678781,
-}
-IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
-VIDEO_EXTENSIONS = {".mp4", ".mov", ".webm", ".m4v", ".mkv"}
+IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp', '.bmp'}
 MAX_SCAN_BYTES = 8 * 1024 * 1024
-MAX_VIDEO_SCAN_BYTES = 32 * 1024 * 1024
-MAX_OCR_FRAMES = 3
-MAX_VIDEO_FRAMES = 5
-OCR_CONFIDENCE_THRESHOLD = 0.45
-NSFW_SCORE_THRESHOLD = 0.55
+MAX_ATTACHMENTS = 6
+QUEUE_SIZE = 8
+OCR_TIMEOUT = 15
+DOWNLOAD_TIMEOUT = 10
+REST_TIMEOUT = 10
+IDLE_TIMEOUT = 60
+MAX_AGE = 120
+SCAN_BUDGET = 45
+CACHE_SIZE = 256
+SCAM_TIMEOUT = timedelta(days=7)
+# Queued copies of one scam burst must not repeatedly extend the same timeout.
+TIMEOUT_TOLERANCE = timedelta(minutes=5)
+SCAM_REASON = "Scam"
+TEST_BOT_ID = 1263186086260244520
+TEST_GUILD_ID = 1498714554983645207
 
-LOW_RISK = "low"
-MEDIUM_RISK = "medium"
-HIGH_RISK = "high"
-ALERT_THRESHOLD = 70
-REVIEW_THRESHOLD = 45
 
-URL_RE = re.compile(r"https?://|discord\.gift|discord\.gg|www\.", re.IGNORECASE)
-URL_TOKEN_RE = re.compile(r"https?://\S+", re.IGNORECASE)
-SHORTENER_RE = re.compile(
-    r"\b(?:bit\.ly|tinyurl\.com|t\.co|goo\.gl|is\.gd|cutt\.ly|rebrand\.ly|rb\.gy)\b",
-    re.IGNORECASE,
-)
-SUSPICIOUS_DOMAIN_RE = re.compile(
-    r"\b[\w.-]+\.(?:ru|cn|top|xyz|click|link|zip|mov|work|live|site|online|shop|gift|claim|win)\b",
-    re.IGNORECASE,
-)
-MONEY_RE = re.compile(
-    r"(?:\$\s?\d"
-    r"|\d[\d,]*\s*(?:k\b|grand|dollars?|usd|euros?|pounds?|bucks|thousand|million|billion)"
-    r"|(?:hundred|thousand|million|billion)\s+(?:dollars?|usd|euros?|pounds?|bucks)"
-    r"|\bdollars?\b|\beuros?\b"
-    r"|usd|cash(?:\s*app)?|money|gift\s*card|nitro|robux|v-?bucks|crypto|bitcoin|btc|eth|paypal|venmo|zelle)",
-    re.IGNORECASE,
-)
-HANDLE_RE = re.compile(r"@(?:everyone|here|[\w.-]{2,32})", re.IGNORECASE)
-DM_LURE_RE = re.compile(
-    r"\b(?:dm|dms|pm|pms|msg|message|inbox|hmu|contact|text|add)\s+me\b"
-    r"|\bdm\s+(?:me|us)\b"
-    r"|\bfirst\s+(?:\d+|person|people|few|one|to)\b"
-    r"|\bwho(?:ever)?\s+(?:dms|messages|pms|contacts)\b",
-    re.IGNORECASE,
-)
-HOOK_RE = re.compile(
-    r"\b(?:get|getting|become|becoming)\s+rich\b"
-    r"|\brich\s+quick\b"
-    r"|\bmake\s+money\s+fast\b"
-    r"|\bquick\s+(?:money|cash)\b"
-    r"|\bchance\s+to\s+win\b"
-    r"|\bwin\s+(?:\$|\d|big|one\s+(?:hundred|thousand|million|billion))",
-    re.IGNORECASE,
-)
-OFF_PLATFORM_RE = re.compile(
-    r"\b(?:telegram|whatsapp|whats\s*app|signal|wechat|kik|snapchat|t\.me)\b",
-    re.IGNORECASE,
-)
-BARE_DOMAIN_RE = re.compile(
-    r"\b[\w-]{2,}\.(?:com|net|org|io|me|gg|co|app|info|biz|live|online|site|shop|store|vip|win|top|fun|cc|tk|ml|xyz|click|link)\b",
-    re.IGNORECASE,
-)
+def staff(member):
+    p = getattr(member, 'guild_permissions', None)
+    return bool(getattr(p, 'administrator', False) or getattr(p, 'manage_messages', False) or any(str(getattr(r, 'name', '')).casefold() in MODERATION_BYPASS_ROLE_NAMES for r in getattr(member, 'roles', ())))
 
-BRAND_TERMS = (
-    "mrbeast",
-    "mr beast",
-    "discord",
-    "nitro",
-    "steam",
-    "roblox",
-    "fortnite",
-    "cash app",
-    "paypal",
-    "apple",
-    "amazon",
-    "google",
-    "youtube",
-)
-GIVEAWAY_TERMS = (
-    "giveaway",
-    "winner",
-    "won",
-    "prize",
-    "reward",
-    "free",
-    "limited time",
-    "congratulations",
-    "airdrop",
-    "giving away",
-    "give away",
-    "handing out",
-    "free money",
-    "free cash",
-)
-STRONG_ACTION_TERMS = (
-    "claim",
-    "verify",
-    "register",
-    "login",
-    "log in",
-    "sign in",
-    "sign up",
-    "redeem",
-    "promo code",
-    "scan qr",
-    "scan the qr",
-    "connect wallet",
-    "seed phrase",
-    "password",
-    "enter code",
-    "payment",
-    "withdrawal",
-)
-WEAK_ACTION_TERMS = (
-    "click",
-    "tap",
-    "visit",
-    "page",
-    "continue",
-    "subscribe",
-)
-PARODY_TERMS = (
-    "joke",
-    "meme",
-    "parody",
-    "satire",
-    "fake",
-    "shitpost",
-    "sketch",
-    "drawing",
-    "drawn",
-)
-STOCK_MARKET_TERMS = (
-    "stock",
-    "share price",
-    "nyse",
-    "nasdaq",
-    "ticker",
-    "market cap",
-    "after hours",
-    "portfolio",
-    "shares",
-    "ytd",
-)
-MODERATION_EVIDENCE_TERMS = (
-    "possible unsafe message detected",
-    "forwarded for human review",
-    "message deleted",
-    "jump to message",
-    "report summary",
-    "selected message",
-    "report category",
-    "submit report",
-)
-SELECTED_WINNER_RE = re.compile(
-    r"\b(?:you(?:'ve| have)?(?: been)?|you are|you were)\s+selected\b"
-    r"|\bselected\s+(?:winner|for\s+(?:a\s+)?(?:prize|reward|giveaway))\b",
-    re.IGNORECASE,
-)
-NSFW_CLASSES = {
-    "ANUS_EXPOSED",
-    "BUTTOCKS_EXPOSED",
-    "FEMALE_BREAST_EXPOSED",
-    "FEMALE_GENITALIA_EXPOSED",
-    "MALE_GENITALIA_EXPOSED",
-    "EXPOSED_ANUS",
-    "EXPOSED_BUTTOCKS",
-    "EXPOSED_BREAST",
-    "EXPOSED_BREASTS",
-    "EXPOSED_VAGINA",
-    "EXPOSED_PENIS",
-}
 
-_rapid_ocr = None
-_rapid_ocr_unavailable = False
-_nude_detector = None
-_nude_detector_unavailable = False
+def review_staff(member):
+    return staff(member) or any(
+        str(getattr(role, "name", "")).casefold() in REVIEW_ACCESS_ROLE_NAMES
+        for role in getattr(member, "roles", ())
+    )
+
+
+def is_visual_attachment(a):
+    mime = (getattr(a, 'content_type', '') or '').split(';')[0].lower()
+    return (mime in {'image/png','image/jpeg','image/webp','image/bmp','image/x-ms-bmp'} or (not mime and Path(getattr(a, 'filename', '') or '').suffix.lower() in IMAGE_EXTENSIONS)) and 0 < (getattr(a, 'size', 0) or 0) <= MAX_SCAN_BYTES
+
+
+def signature(m):
+    return (m.content or '', tuple((a.id, a.size, a.filename) for a in m.attachments))
+
+
+class OCRProcess:
+    def __init__(self):
+        self.proc = None
+        self.retry_at = 0
+
+    async def stop(self):
+        p, self.proc = self.proc, None
+        if p is not None:
+            if p.returncode is None:
+                try: p.kill()
+                except ProcessLookupError: pass
+            await p.wait()
+
+    async def _exchange(self, data):
+        if self.proc is None or self.proc.returncode is not None:
+            await self.stop()
+            env = dict(os.environ)
+            for k in ('OMP_NUM_THREADS','OPENBLAS_NUM_THREADS','MKL_NUM_THREADS','NUMEXPR_NUM_THREADS'):
+                env[k] = '1'
+            spawn = asyncio.create_task(asyncio.create_subprocess_exec(sys.executable, '-u', '-m', 'utils.scam_ocr_worker', cwd=str(Path(__file__).resolve().parents[1]), env=env, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE))
+            try:
+                self.proc = await asyncio.shield(spawn)
+            except asyncio.CancelledError:
+                # Recover the process handle even if cancellation arrives during creation.
+                self.proc = await spawn
+                await self.stop()
+                raise
+        p = self.proc
+        p.stdin.write(struct.pack('!I', len(data)) + data)
+        await p.stdin.drain()
+        n = struct.unpack('!I', await p.stdout.readexactly(4))[0]
+        if not 1 <= n <= 24001:
+            raise ValueError('invalid OCR response length')
+        response = await p.stdout.readexactly(n)
+        if response == b'\x02':
+            return Match('near-identical known campaign screenshot')
+        if response[0] != 0:
+            raise RuntimeError('OCR worker failed: ' + response[1:].decode('ascii','replace')[:128])
+        return response[1:].decode('utf-8', 'replace')
+
+    async def scan(self, data):
+        if time.monotonic() < self.retry_at:
+            return None
+        try:
+            return await asyncio.wait_for(self._exchange(data), OCR_TIMEOUT)
+        except asyncio.CancelledError:
+            await self.stop()
+            raise
+        except Exception as exc:
+            log.warning('Scam OCR unavailable: %s', type(exc).__name__)
+            await self.stop()
+            self.retry_at = time.monotonic() + 30
+            return None
 
 
 @dataclass(frozen=True)
-class ScamAssessment:
-    score: int
-    level: str
-    reasons: tuple[str, ...]
-    scanned_text: str = ""
-    content_kind: str = "image"
-
-    @property
-    def should_alert(self) -> bool:
-        return self.score >= ALERT_THRESHOLD
-
-
-def normalize_text(value: Optional[str]) -> str:
-    return re.sub(r"\s+", " ", str(value or "")).strip().lower()
-
-
-def contains_term(text: str, term: str) -> bool:
-    return re.search(rf"(?<!\w){re.escape(term)}(?!\w)", text) is not None
-
-
-def contains_any(text: str, terms: Iterable[str]) -> bool:
-    return any(contains_term(text, term) for term in terms)
-
-
-def has_moderation_bypass_role(member) -> bool:
-    return any(getattr(role, "id", None) in MODERATION_BYPASS_ROLE_IDS for role in getattr(member, "roles", []))
-
-
-def score_to_level(score: int) -> str:
-    if score >= ALERT_THRESHOLD:
-        return HIGH_RISK
-    if score >= REVIEW_THRESHOLD:
-        return MEDIUM_RISK
-    return LOW_RISK
-
-
-def assess_scam_text(
-    text: str,
-    *,
-    has_qr: bool = False,
-    has_visual_attachment: bool = True,
-    nsfw_detections: Iterable[str] = (),
-    content_kind: str = "image",
-) -> ScamAssessment:
-    normalized = normalize_text(text)
-    score = 0
-    reasons: list[str] = []
-    nsfw_detections = tuple(nsfw_detections)
-
-    if has_visual_attachment:
-        score += 5
-
-    if nsfw_detections:
-        score += 100
-        reasons.append("detects explicit or adult visual content")
-
-    has_brand = contains_any(normalized, BRAND_TERMS)
-    has_money = bool(MONEY_RE.search(normalized))
-    has_hook = bool(HOOK_RE.search(normalized))
-    has_reward_language = contains_any(normalized, GIVEAWAY_TERMS) or bool(SELECTED_WINNER_RE.search(normalized))
-    has_giveaway = has_reward_language or has_money or has_hook
-    has_strong_action = contains_any(normalized, STRONG_ACTION_TERMS)
-    has_weak_action = contains_any(normalized, WEAK_ACTION_TERMS)
-    has_dm_lure = bool(DM_LURE_RE.search(normalized))
-    has_off_platform = bool(OFF_PLATFORM_RE.search(normalized))
-    has_bare_domain = bool(BARE_DOMAIN_RE.search(normalized))
-    has_url = bool(URL_RE.search(normalized) or SHORTENER_RE.search(normalized) or SUSPICIOUS_DOMAIN_RE.search(normalized))
-    has_parody = contains_any(normalized, PARODY_TERMS)
-
-    if has_brand:
-        score += 15
-        reasons.append("mentions an impersonation-prone brand or creator")
-
-    if has_giveaway:
-        score += 20
-        reasons.append("uses giveaway, prize, money, or reward language")
-
-    if has_strong_action:
-        score += 25
-        reasons.append("asks users to claim, verify, log in, scan, or enter sensitive info")
-    elif has_weak_action:
-        score += 5
-        reasons.append("uses weak call-to-action language")
-
-    if has_dm_lure:
-        score += 25
-        reasons.append("asks people to DM, contact privately, or be the 'first' to respond")
-
-    if has_money and has_dm_lure:
-        score += 30
-        reasons.append("offers money or prizes in exchange for DMing or contacting privately")
-    elif has_giveaway and has_dm_lure:
-        score += 10
-        reasons.append("combines giveaway or free-stuff language with a request to contact privately")
-
-    if has_bare_domain and not has_url:
-        score += 20
-        reasons.append("points users to an external website")
-
-    if has_off_platform and (has_dm_lure or has_url or has_bare_domain):
-        score += 20
-        reasons.append("tries to move users to an off-platform app like Telegram or WhatsApp")
-
-    if has_url:
-        score += 30
-        reasons.append("contains a link or suspicious domain")
-
-    if has_qr:
-        score += 30
-        reasons.append("contains a QR code")
-
-    if HANDLE_RE.search(normalized) and has_giveaway:
-        score += 10
-        reasons.append("combines a mention with reward language")
-
-    if has_brand and has_giveaway and (has_strong_action or has_url or has_qr):
-        score += 15
-        reasons.append("combines brand impersonation, reward language, and a risky action")
-
-    if has_brand and has_giveaway and has_weak_action and not has_strong_action and not has_url and not has_qr:
-        score += 25
-        reasons.append("looks like a creator giveaway ad asking users to visit or continue")
-
-    if has_parody and not has_url and not has_qr and not has_strong_action:
-        score = max(0, score - 25)
-        reasons.append("looks like a joke/parody without a link, QR code, or account action")
-
-    stock_context_signals = sum(contains_term(normalized, term) for term in STOCK_MARKET_TERMS)
-    if (
-        stock_context_signals >= 2
-        and not has_reward_language
-        and not has_hook
-        and not has_strong_action
-        and not has_dm_lure
-        and not has_off_platform
-        and not has_qr
-    ):
-        score = min(score, REVIEW_THRESHOLD - 1)
-        reasons.append("looks like stock market information without a solicitation")
-
-    moderation_evidence_signals = sum(contains_term(normalized, term) for term in MODERATION_EVIDENCE_TERMS)
-    if moderation_evidence_signals >= 2 and not nsfw_detections:
-        score = min(score, REVIEW_THRESHOLD - 1)
-        reasons.append("looks like a screenshot of moderation or report evidence")
-
-    score = min(score, 100)
-    if score < REVIEW_THRESHOLD and not reasons:
-        reasons.append("no strong scam signals found")
-
-    return ScamAssessment(
-        score=score,
-        level=score_to_level(score),
-        reasons=tuple(reasons),
-        scanned_text=clip(text, 500),
-        content_kind=content_kind,
-    )
-
-
-def is_visual_attachment(attachment) -> bool:
-    content_type = normalize_text(getattr(attachment, "content_type", ""))
-    filename = normalize_text(getattr(attachment, "filename", ""))
-    suffix = Path(filename).suffix
-    return content_type.startswith("image/") or suffix in IMAGE_EXTENSIONS
-
-
-def is_video_attachment(attachment) -> bool:
-    content_type = normalize_text(getattr(attachment, "content_type", ""))
-    filename = normalize_text(getattr(attachment, "filename", ""))
-    suffix = Path(filename).suffix
-    return content_type.startswith("video/") or suffix in VIDEO_EXTENSIONS
-
-
-def clean_url(value: str) -> str:
-    return str(value or "").strip("<>()[]{}.,!?")
-
-
-def is_visual_url(value: str) -> bool:
-    url = clean_url(value).lower()
-    without_query = url.split("?", 1)[0].split("#", 1)[0]
-    return (
-        without_query.endswith(tuple(IMAGE_EXTENSIONS))
-        or "tenor.com/view/" in url
-        or "giphy.com/gifs/" in url
-        or "media.discordapp.net/" in url
-        or "cdn.discordapp.com/" in url
-    )
-
-
-def visual_urls_from_message(message) -> list[str]:
-    urls = [clean_url(match.group(0)) for match in URL_TOKEN_RE.finditer(getattr(message, "content", "") or "")]
-
-    for embed in getattr(message, "embeds", []) or []:
-        for attr_name in ("image", "thumbnail"):
-            embed_image = getattr(embed, attr_name, None)
-            image_url = getattr(embed_image, "url", None)
-            if image_url:
-                urls.append(clean_url(image_url))
-
-    return [url for url in urls if is_visual_url(url)]
-
-
-def attachment_label(attachment) -> str:
-    filename = getattr(attachment, "filename", None) or "attachment"
-    url = getattr(attachment, "url", None) or getattr(attachment, "proxy_url", None)
-    if url:
-        return f"[{filename}]({url})"
-    return f"`{filename}`"
-
-
-def attachment_lines(message) -> list[str]:
-    return [attachment_label(attachment) for attachment in getattr(message, "attachments", [])]
-
-
-def clip(text: str, limit: int = 1000) -> str:
-    if len(text) <= limit:
-        return text
-    return text[: limit - 20] + "\n... *(truncated)*"
-
-
-def optional_ocr_available() -> bool:
-    if get_rapid_ocr() is not None:
-        return True
-
-    try:
-        import PIL.Image
-        import pytesseract
-    except ImportError:
-        return False
-    return True
-
-
-def optional_qr_available() -> bool:
-    try:
-        import pyzbar.pyzbar
-        import PIL.Image
-    except ImportError:
-        return False
-    return True
-
-
-def optional_nudity_available() -> bool:
-    return get_nude_detector() is not None
-
-
-def get_rapid_ocr():
-    global _rapid_ocr, _rapid_ocr_unavailable
-    if _rapid_ocr_unavailable:
-        return None
-    if _rapid_ocr is not None:
-        return _rapid_ocr
-
-    try:
-        from rapidocr_onnxruntime import RapidOCR
-    except ImportError:
-        _rapid_ocr_unavailable = True
-        return None
-
-    try:
-        _rapid_ocr = RapidOCR()
-    except Exception:
-        _rapid_ocr_unavailable = True
-        return None
-
-    return _rapid_ocr
-
-
-def get_nude_detector():
-    global _nude_detector, _nude_detector_unavailable
-    if _nude_detector_unavailable:
-        return None
-    if _nude_detector is not None:
-        return _nude_detector
-
-    try:
-        from nudenet import NudeDetector
-    except ImportError:
-        _nude_detector_unavailable = True
-        return None
-
-    try:
-        _nude_detector = NudeDetector()
-    except Exception:
-        _nude_detector_unavailable = True
-        return None
-
-    return _nude_detector
-
-
-def extract_text_with_rapidocr(data: bytes) -> str:
-    engine = get_rapid_ocr()
-    if engine is None:
-        return ""
-
-    try:
-        result, _ = engine(data)
-    except Exception:
-        return ""
-
-    if not result:
-        return ""
-
-    lines = []
-    for item in result:
-        if len(item) < 3:
-            continue
-        text = str(item[1] or "").strip()
-        try:
-            confidence = float(item[2])
-        except (TypeError, ValueError):
-            confidence = 0
-        if text and confidence >= OCR_CONFIDENCE_THRESHOLD:
-            lines.append(text)
-
-    return "\n".join(lines)
-
-
-def detect_nsfw_with_nudenet(data: bytes) -> tuple[str, ...]:
-    detector = get_nude_detector()
-    if detector is None:
-        return ()
-
-    try:
-        detections = detector.detect(data)
-    except Exception:
-        return ()
-
-    unsafe = []
-    for detection in detections or []:
-        label = normalize_text(detection.get("class", "")).upper().replace(" ", "_")
-        try:
-            score = float(detection.get("score", 0))
-        except (TypeError, ValueError):
-            score = 0
-
-        if label in NSFW_CLASSES and score >= NSFW_SCORE_THRESHOLD:
-            unsafe.append(f"{label} ({score:.2f})")
-
-    return tuple(unsafe)
-
-
-def scan_video_bytes(data: bytes, suffix: str = ".mp4") -> tuple[str, bool, tuple[str, ...]]:
-    try:
-        import cv2
-    except ImportError:
-        return "", False, ()
-
-    temp_path = None
-    text_parts: list[str] = []
-    has_qr = False
-    nsfw_detections: list[str] = []
-
-    try:
-        with tempfile.NamedTemporaryFile(suffix=suffix or ".mp4", delete=False) as temp_file:
-            temp_file.write(data)
-            temp_path = temp_file.name
-
-        capture = cv2.VideoCapture(temp_path)
-        if not capture.isOpened():
-            return "", False, ()
-
-        frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-        if frame_count > 0:
-            frame_indexes = [
-                int((index + 1) * frame_count / (MAX_VIDEO_FRAMES + 1))
-                for index in range(MAX_VIDEO_FRAMES)
-            ]
-        else:
-            frame_indexes = list(range(MAX_VIDEO_FRAMES))
-
-        for frame_index in frame_indexes:
-            if frame_index > 0:
-                capture.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
-
-            ok, frame = capture.read()
-            if not ok:
-                continue
-
-            ok, encoded = cv2.imencode(".jpg", frame)
-            if not ok:
-                continue
-
-            frame_bytes = encoded.tobytes()
-            extracted_text, frame_has_qr = extract_text_from_image_bytes(frame_bytes)
-            if extracted_text:
-                text_parts.append(extracted_text)
-            has_qr = has_qr or frame_has_qr
-            nsfw_detections.extend(detect_nsfw_with_nudenet(frame_bytes))
-
-        capture.release()
-    except Exception:
-        return "", False, ()
-    finally:
-        if temp_path:
-            try:
-                os.unlink(temp_path)
-            except OSError:
-                pass
-
-    return "\n".join(text_parts), has_qr, tuple(nsfw_detections)
-
-
-def extract_text_from_image_bytes(data: bytes) -> tuple[str, bool]:
-    text_parts: list[str] = []
-    has_qr = False
-    rapid_text = extract_text_with_rapidocr(data)
-    if rapid_text:
-        text_parts.append(rapid_text)
-
-    try:
-        from PIL import Image, ImageSequence
-    except ImportError:
-        return "", False
-
-    try:
-        image = Image.open(BytesIO(data))
-    except Exception:
-        return "", False
-
-    frames = []
-    try:
-        for index, frame in enumerate(ImageSequence.Iterator(image)):
-            if index >= MAX_OCR_FRAMES:
-                break
-            frames.append(frame.convert("RGB"))
-    except Exception:
-        frames = [image.convert("RGB")]
-
-    try:
-        import pytesseract
-    except ImportError:
-        pytesseract = None
-
-    try:
-        from pyzbar.pyzbar import decode as decode_qr
-    except ImportError:
-        decode_qr = None
-
-    for frame in frames:
-        if pytesseract is not None:
-            try:
-                text = pytesseract.image_to_string(frame)
-                if text:
-                    text_parts.append(text)
-            except Exception:
-                pass
-
-        if decode_qr is not None:
-            try:
-                decoded = decode_qr(frame)
-                if decoded:
-                    has_qr = True
-                    for code in decoded:
-                        data_text = getattr(code, "data", b"")
-                        if isinstance(data_text, bytes):
-                            data_text = data_text.decode("utf-8", errors="ignore")
-                        if data_text:
-                            text_parts.append(str(data_text))
-            except Exception:
-                pass
-
-    return "\n".join(text_parts), has_qr
+class Job:
+    guild_id: int
+    channel_id: int
+    message_id: int
+    created: float
 
 
 class ScamImageDetector(commands.Cog):
-    def __init__(self, bot: APBot) -> None:
+    def __init__(self, bot):
         self.bot = bot
+        self.queue = asyncio.Queue(QUEUE_SIZE)
+        self.pending = set()
+        self.dirty = set()
+        self.task = None
+        self.ocr = OCRProcess()
+        self.closed = False
+        self.last_overload = -float('inf')
+        self.skipped = 0
+        self.cache = OrderedDict()
 
-    def _config_get(self, key, default=None):
-        config = getattr(self.bot, "config", None)
-        if config is None:
-            return default
-        return config.get(key, default)
+    def cog_unload(self):
+        self.closed = True
+        if self.task is not None:
+            self.task.cancel()
 
-    def enabled_bot_ids(self) -> set[int]:
-        configured_ids = set(DEFAULT_ENABLED_BOT_IDS)
-        config = getattr(self.bot, "config", None)
+    def config(self, key, default=None):
+        defaults = {
+            'scam_detector_enabled': SCAM_DETECTOR_ENABLED,
+            'scam_detector_dry_run': SCAM_DETECTOR_DRY_RUN,
+            'scam_detector_test_mode': SCAM_DETECTOR_TEST_MODE and getattr(getattr(self.bot, 'user', None), 'id', None) == TEST_BOT_ID,
+        }
+        return self.bot.config.get(key, defaults.get(key, default))
 
-        if config is not None:
-            application_id = config.get("application_id")
-            if application_id is not None:
-                try:
-                    configured_ids.add(int(application_id))
-                except (TypeError, ValueError):
-                    pass
+    def test_mode(self):
+        return self.config('scam_detector_test_mode', False) is True
 
-            for bot_id in config.get("scam_detector_enabled_bot_ids", []) or []:
-                try:
-                    configured_ids.add(int(bot_id))
-                except (TypeError, ValueError):
-                    pass
-
-        return configured_ids
-
-    def is_enabled_for_current_bot(self) -> bool:
-        if getattr(self.bot, "scam_detector_always_enabled", False):
-            return True
-        bot_user_id = getattr(getattr(self.bot, "user", None), "id", None)
-        return bot_user_id is None or bot_user_id in self.enabled_bot_ids()
-
-    async def scan_attachment(self, attachment) -> tuple[str, bool, tuple[str, ...]]:
-        if not is_visual_attachment(attachment):
-            return "", False, ()
-
-        if not optional_ocr_available() and not optional_qr_available() and not optional_nudity_available():
-            return "", False, ()
-
-        size = getattr(attachment, "size", 0) or 0
-        if size > MAX_SCAN_BYTES:
-            return "", False, ()
-
+    def in_scope(self, guild_id, channel_id):
         try:
-            data = await attachment.read()
-        except (nextcord.HTTPException, AttributeError):
-            return "", False, ()
+            bot_id = self.bot.user.id
+            if self.test_mode() and (bot_id != TEST_BOT_ID or guild_id != TEST_GUILD_ID):
+                return False
+            application = int(self.config('application_id', bot_id))
+            if self.closed or self.config('scam_detector_enabled', True) is not True or bot_id != application or guild_id != int(self.config('guild_id')):
+                return False
+            channel = self.bot.get_channel(channel_id)
+            return str(getattr(channel, 'name', '')).casefold() != REVIEW_CHANNEL_NAME.casefold()
+        except (AttributeError, TypeError, ValueError):
+            return False
 
-        extracted_text, has_qr = await asyncio.to_thread(extract_text_from_image_bytes, data)
-        nsfw_detections = await asyncio.to_thread(detect_nsfw_with_nudenet, data)
-        return extracted_text, has_qr, nsfw_detections
+    def eligible(self, m):
+        return bool(m.guild and self.in_scope(m.guild.id, m.channel.id) and not m.author.bot and (self.test_mode() or not staff(m.author)) and isinstance(m.author, nextcord.Member))
 
-    async def scan_video_attachment(self, attachment) -> tuple[str, bool, tuple[str, ...]]:
-        if not is_video_attachment(attachment):
-            return "", False, ()
-
-        size = getattr(attachment, "size", 0) or 0
-        if size > MAX_VIDEO_SCAN_BYTES:
-            return "", False, ()
-
+    def enqueue(self, guild_id, channel_id, message_id, *, edited=False):
+        if not self.in_scope(guild_id, channel_id):
+            return
+        key = (channel_id, message_id)
+        if key in self.pending:
+            if edited: self.dirty.add(key)
+            return
         try:
-            data = await attachment.read()
-        except (nextcord.HTTPException, AttributeError):
-            return "", False, ()
-
-        suffix = Path(normalize_text(getattr(attachment, "filename", ""))).suffix or ".mp4"
-        return await asyncio.to_thread(scan_video_bytes, data, suffix)
-
-    async def assess_message(self, message: nextcord.Message) -> Optional[ScamAssessment]:
-        visual_attachments = [
-            attachment for attachment in getattr(message, "attachments", []) if is_visual_attachment(attachment)
-        ]
-        video_attachments = [
-            attachment for attachment in getattr(message, "attachments", []) if is_video_attachment(attachment)
-        ]
-        visual_urls = visual_urls_from_message(message)
-        has_media = bool(visual_attachments or video_attachments or visual_urls)
-
-        text_parts = [getattr(message, "content", "")]
-        has_qr = False
-        nsfw_detections = []
-        content_kind = "video" if video_attachments and not visual_attachments and not visual_urls else "image"
-
-        for attachment in visual_attachments:
-            text_parts.append(getattr(attachment, "filename", ""))
-            extracted_text, attachment_has_qr, attachment_nsfw_detections = await self.scan_attachment(attachment)
-            if extracted_text:
-                text_parts.append(extracted_text)
-            has_qr = has_qr or attachment_has_qr
-            nsfw_detections.extend(attachment_nsfw_detections)
-
-        for attachment in video_attachments:
-            text_parts.append(getattr(attachment, "filename", ""))
-            extracted_text, attachment_has_qr, attachment_nsfw_detections = await self.scan_video_attachment(attachment)
-            if extracted_text:
-                text_parts.append(extracted_text)
-            has_qr = has_qr or attachment_has_qr
-            nsfw_detections.extend(attachment_nsfw_detections)
-
-        assessment = assess_scam_text(
-            "\n".join(text_parts),
-            has_qr=has_qr,
-            has_visual_attachment=has_media,
-            nsfw_detections=nsfw_detections,
-            content_kind=content_kind if has_media else "text",
-        )
-
-        if not has_media and not assessment.should_alert:
-            return None
-        return assessment
-
-    async def get_forward_channel(self):
-        channel = self.bot.get_channel(REVIEW_CHANNEL_ID)
-        if channel is not None:
-            return channel
-        try:
-            return await self.bot.fetch_channel(REVIEW_CHANNEL_ID)
-        except (AttributeError, nextcord.Forbidden, nextcord.NotFound, nextcord.HTTPException) as exc:
-            log.warning("Unable to access review channel %s: %s", REVIEW_CHANNEL_ID, exc)
-            return None
-
-    def build_alert_embed(self, message: nextcord.Message, assessment: ScamAssessment) -> nextcord.Embed:
-        attachments = attachment_lines(message)
-        original_content = getattr(message, "content", "") or ""
-        author = getattr(message, "author", None)
-        author_id = getattr(author, "id", "unknown")
-        author_name = str(author) if author else str(author_id)
-        channel = getattr(message, "channel", None)
-        channel_name = getattr(channel, "name", None) or "unknown channel"
-        channel_id = getattr(channel, "id", "?")
-
-        embed = nextcord.Embed(
-            title="Possible Unsafe Message Detected",
-            description="This was forwarded for human review. The bot did not delete the original message.",
-            color=nextcord.Color.orange(),
-        )
-        embed.add_field(name="User", value=f"{author_name} (`{author_id}`)", inline=False)
-        embed.add_field(name="Channel", value=f"#{channel_name} (`{channel_id}`)", inline=True)
-        embed.add_field(name="Risk", value=f"{assessment.level.title()} ({assessment.score}/100)", inline=True)
-        embed.add_field(name="Reasons", value=clip("\n".join(f"- {reason}" for reason in assessment.reasons), 1000), inline=False)
-        if original_content:
-            embed.add_field(name="Original Text", value=clip(original_content, 1000), inline=False)
-        jump_url = getattr(message, "jump_url", None)
-        if jump_url:
-            embed.add_field(name="Message", value=f"[Jump to message]({jump_url})", inline=False)
-
-        if attachments:
-            embed.add_field(name="Attachments", value=clip("\n".join(attachments), 1000), inline=False)
-
-        return embed
-
-    async def get_forward_files(self, message: nextcord.Message) -> tuple[list[nextcord.File], Optional[str]]:
-        files = []
-        preview_filename = None
-
-        for attachment in (getattr(message, "attachments", []) or [])[:10]:
-            if not (is_visual_attachment(attachment) or is_video_attachment(attachment)):
-                continue
-
-            try:
-                forwarded_file = await attachment.to_file(use_cached=True)
-            except (AttributeError, nextcord.Forbidden, nextcord.NotFound, nextcord.HTTPException):
-                continue
-
-            files.append(forwarded_file)
-            if preview_filename is None and is_visual_attachment(attachment):
-                preview_filename = forwarded_file.filename
-
-        return files, preview_filename
+            self.queue.put_nowait(Job(guild_id, channel_id, message_id, time.monotonic()))
+        except asyncio.QueueFull:
+            self.skipped += 1
+            now = time.monotonic()
+            if now - self.last_overload >= 60:
+                log.warning('Scam scanner overloaded; skipped=%s (fail open)', self.skipped)
+                self.last_overload = now
+            return
+        self.pending.add(key)
+        if self.task is None or self.task.done():
+            self.task = asyncio.create_task(self.run())
 
     @commands.Cog.listener()
-    async def on_message(self, message: nextcord.Message) -> None:
-        if not self.is_enabled_for_current_bot():
+    async def on_message(self, message):
+        if self.eligible(message) and any(is_visual_attachment(a) for a in message.attachments):
+            self.enqueue(message.guild.id, message.channel.id, message.id)
+
+    @commands.Cog.listener()
+    async def on_raw_message_edit(self, payload):
+        if not self.in_scope(payload.guild_id, payload.channel_id):
             return
-
-        if getattr(message, "guild", None) is None:
+        data = payload.data
+        if 'content' not in data and 'attachments' not in data:
             return
+        key = (payload.channel_id, payload.message_id)
+        cached = getattr(payload, 'cached_message', None)
+        raw_images = any(is_visual_attachment(SimpleNamespace(**{k: a.get(k) for k in ('filename', 'content_type', 'size')}))
+                         for a in (data.get('attachments') or []) if isinstance(a, dict))
+        if key in self.pending or raw_images or (cached and self.eligible(cached) and any(is_visual_attachment(a) for a in cached.attachments)):
+            self.enqueue(payload.guild_id, payload.channel_id, payload.message_id, edited=True)
 
-        author = getattr(message, "author", None)
-        if getattr(author, "bot", False):
-            return
-
-        if has_moderation_bypass_role(author):
-            return
-
-        source_channel_id = getattr(getattr(message, "channel", None), "id", None)
-        if source_channel_id == REVIEW_CHANNEL_ID:
-            return
-
-        assessment = await self.assess_message(message)
-        if assessment is None:
-            return
-
-        if not assessment.should_alert:
-            return
-
-        alert_channel = await self.get_forward_channel()
-        if alert_channel is None:
-            return
-
-        embed = self.build_alert_embed(message, assessment)
-        files, preview_filename = await self.get_forward_files(message)
-        media_urls = visual_urls_from_message(message)
-        content = "\n".join(media_urls) or None
-        if preview_filename:
-            embed.set_image(url=f"attachment://{preview_filename}")
-
-        send_kwargs = {
-            "content": content,
-            "embed": embed,
-            "allowed_mentions": nextcord.AllowedMentions.none(),
-        }
-        if files:
-            send_kwargs["files"] = files
-
+    async def run(self):
         try:
-            await alert_channel.send(**send_kwargs)
-        except nextcord.Forbidden as exc:
-            log.warning("Unable to forward message %s: %s", getattr(message, "id", "unknown"), exc)
-        except nextcord.HTTPException as exc:
-            if not files:
-                log.warning("Unable to forward message %s: %s", getattr(message, "id", "unknown"), exc)
-                return
+            while not self.closed:
+                try:
+                    job = await asyncio.wait_for(self.queue.get(), IDLE_TIMEOUT)
+                except asyncio.TimeoutError:
+                    await self.ocr.stop()
+                    continue
+                key = (job.channel_id, job.message_id)
+                try:
+                    if time.monotonic() - job.created <= MAX_AGE:
+                        await self.process(job)
+                    else:
+                        log.warning('Scam scan expired: message=%s', job.message_id)
+                except nextcord.NotFound:
+                    pass
+                except Exception as exc:
+                    log.warning('Scam scan failed: message=%s error=%s', job.message_id, type(exc).__name__)
+                finally:
+                    self.pending.discard(key)
+                    changed = key in self.dirty
+                    self.dirty.discard(key)
+                    self.queue.task_done()
+                    if changed and not self.closed:
+                        self.enqueue(job.guild_id, job.channel_id, job.message_id)
+        finally:
+            await self.ocr.stop()
 
-            embed.remove_image()
+    async def fetch(self, job):
+        channel = self.bot.get_channel(job.channel_id)
+        if channel is None:
+            return None
+        if getattr(getattr(channel, 'guild', None), 'id', None) != job.guild_id:
+            return None
+        return await asyncio.wait_for(channel.fetch_message(job.message_id), REST_TIMEOUT)
+
+    async def assess(self, message, *, evidence=None, all_matches=False):
+        first = (None, None)
+        # Scan images independently: unrelated text in multiple pictures cannot combine into a match.
+        for a in [a for a in message.attachments if is_visual_attachment(a)][:MAX_ATTACHMENTS]:
             try:
-                await alert_channel.send(
-                    content=content,
-                    embed=embed,
-                    allowed_mentions=nextcord.AllowedMentions.none(),
-                )
-            except (nextcord.Forbidden, nextcord.HTTPException) as retry_exc:
-                log.warning("Unable to forward message %s: %s", getattr(message, "id", "unknown"), retry_exc)
+                data = await asyncio.wait_for(a.read(), DOWNLOAD_TIMEOUT)
+            except (nextcord.HTTPException, asyncio.TimeoutError):
+                continue
+            if not 0 < len(data) <= MAX_SCAN_BYTES:
+                continue
+            digest = hashlib.sha256(data).hexdigest()
+            if digest in self.cache:
+                result = self.cache[digest]
+                self.cache.move_to_end(digest)
+            else:
+                result = image_match(data)
+                if result is None:
+                    text = await self.ocr.scan(data)
+                    if text is None:
+                        continue  # Never cache an OCR failure as a clean result.
+                    result = text if isinstance(text, Match) else classify_image_text(text)
+                self.cache[digest] = result
+                if len(self.cache) > CACHE_SIZE:
+                    self.cache.popitem(last=False)
+            if result:
+                if evidence is not None:
+                    suffix = Path(a.filename or "").suffix.lower()
+                    if suffix not in IMAGE_EXTENSIONS:
+                        suffix = {"image/jpeg": ".jpg", "image/webp": ".webp", "image/bmp": ".bmp", "image/x-ms-bmp": ".bmp"}.get((a.content_type or "").split(";")[0].lower(), ".png")
+                    evidence.append((data, suffix))
+                if first[0] is None:
+                    first = (result, digest)
+                if not all_matches:
+                    return first
+        return first
+
+    def private_review(self, guild):
+        try:
+            # Cache-only lookup in the source guild. Refuse ambiguous destinations.
+            candidates = [ch for ch in guild.text_channels
+                          if isinstance(ch, nextcord.TextChannel)
+                          and ch.guild.id == guild.id
+                          and ch.name.casefold() == REVIEW_CHANNEL_NAME.casefold()]
+            if len(candidates) != 1:
+                log.warning("Scam review blocked: expected one #%s, found %s", REVIEW_CHANNEL_NAME, len(candidates))
+                return None
+            channel = candidates[0]
+            if channel.permissions_for(guild.default_role).view_channel:
+                log.warning("Scam review blocked: @everyone can view #%s", channel.name)
+                return None
+            me = guild.me
+            p = channel.permissions_for(me)
+            if not (p.view_channel and p.send_messages and p.embed_links and p.attach_files):
+                missing = [name for name in ("view_channel", "send_messages", "embed_links", "attach_files") if not getattr(p, name, False)]
+                log.warning("Scam review blocked: bot missing %s in #%s", ", ".join(missing), channel.name)
+                return None
+            bot_roles = {r.id for r in me.roles if r.is_bot_managed()}
+            for role in guild.roles:
+                if role.id in bot_roles or role.name.casefold() in REVIEW_ACCESS_ROLE_NAMES:
+                    continue
+                if not (role.permissions.administrator or role.permissions.manage_messages) and channel.permissions_for(role).view_channel:
+                    log.warning("Scam review blocked: non-exempt role %r (%s) can view #%s", role.name, role.id, channel.name)
+                    return None
+            for target, overwrite in channel.overwrites.items():
+                if overwrite.view_channel is True and isinstance(target, nextcord.Member) and target.id != me.id and not review_staff(target):
+                    log.warning("Scam review blocked: non-staff member overwrite (%s) in #%s", target.id, channel.name)
+                    return None
+                if overwrite.view_channel is True and not isinstance(target, (nextcord.Member, nextcord.Role)):
+                    log.warning("Scam review blocked: unresolved overwrite in #%s", channel.name)
+                    return None
+            return channel
+        except (AttributeError, ValueError, TypeError) as exc:
+            log.warning("Scam review blocked: permission check error: %s", exc)
+            return None
+
+    async def timeout_sender(self, message):
+        """Apply a native Discord timeout, never a ban or an infraction-point mute."""
+        guild = message.guild
+        if self.test_mode() or not self.eligible(message) or self.config('scam_detector_dry_run', True) is not False:
+            return 'Skipped: enforcement disabled or exemption applies'
+        try:
+            me = guild.me
+            if not getattr(getattr(me, 'guild_permissions', None), 'moderate_members', False):
+                return 'Skipped: bot lacks Moderate Members'
+            member = await asyncio.wait_for(guild.fetch_member(message.author.id), REST_TIMEOUT)
+            if not isinstance(member, nextcord.Member) or member.id != message.author.id:
+                return 'Skipped: member could not be verified'
+            if member.bot or staff(member) or member.id == guild.owner_id or member.id == me.id:
+                return 'Skipped: staff or protected member'
+            if not me.top_role > member.top_role:
+                return 'Skipped: role hierarchy'
+            if not self.in_scope(guild.id, message.channel.id) or self.config('scam_detector_dry_run', True) is not False or self.private_review(guild) is None:
+                return 'Skipped: enforcement disabled or audit unavailable'
+            until = datetime.now(timezone.utc) + SCAM_TIMEOUT
+            existing = member.communication_disabled_until
+            if existing is not None and existing >= until - TIMEOUT_TOLERANCE:
+                return 'Preserved existing timeout (at least approximately seven days remaining)'
+            await asyncio.wait_for(member.timeout(timeout=until, reason=SCAM_REASON), REST_TIMEOUT)
+            return f'Applied 7-day timeout (Scam), expires <t:{int(until.timestamp())}:F>'
+        except nextcord.NotFound:
+            return 'Skipped: member no longer available'
+        except (nextcord.HTTPException, asyncio.TimeoutError):
+            return 'Failed or unconfirmed: check Discord audit log'
+        except (AttributeError, TypeError, ValueError):
+            return 'Skipped: unable to verify timeout eligibility'
+
+    async def post_test_review(self, message, job, evidence):
+        # This path can never punish, even if dry_run is accidentally false.
+        if not self.test_mode() or not self.in_scope(job.guild_id, job.channel_id):
+            return
+        channel = self.private_review(message.guild)
+        if channel is None or not getattr(channel.permissions_for(message.guild.me), 'attach_files', False):
+            log.warning('Scam test match: review channel unavailable or missing Attach Files: message=%s matches=%s', job.message_id, len(evidence))
+            return
+        # Group normal-sized images as the legacy detector did. Large batches
+        # are split to cap each upload at the existing per-image byte budget.
+        batches = []
+        batch, size = [], 0
+        for index, (image, suffix) in enumerate(evidence, 1):
+            if batch and size + len(image) > MAX_SCAN_BYTES:
+                batches.append(batch)
+                batch, size = [], 0
+            batch.append((index, image, suffix))
+            size += len(image)
+        if batch:
+            batches.append(batch)
+        for batch in batches:
+            if not self.test_mode() or not self.in_scope(job.guild_id, job.channel_id) or self.private_review(message.guild) is not channel:
+                return
+            embed = nextcord.Embed(title='Scam Detected', description='Test mode: no action taken.', color=0xED4245)
+            embed.add_field(name='Member', value=f'<@{message.author.id}> (`{message.author.id}`)', inline=False)
+            embed.add_field(name='Channel', value=f'<#{job.channel_id}>', inline=True)
+            embed.add_field(name='Reason', value=SCAM_REASON, inline=True)
+            embed.add_field(name='Message', value=f'[Jump to message](https://discord.com/channels/{job.guild_id}/{job.channel_id}/{job.message_id})', inline=False)
+            embed.add_field(name='Images', value=f'{len(batch)} of {len(evidence)} matches', inline=False)
+            files = []
+            try:
+                for index, image, suffix in batch:
+                    files.append(nextcord.File(BytesIO(image), filename=f'scam-{job.message_id}-{index}{suffix}'))
+                uploaded = await asyncio.wait_for(channel.send(files=files, allowed_mentions=nextcord.AllowedMentions.none()), REST_TIMEOUT)
+                if not self.test_mode() or not self.in_scope(job.guild_id, job.channel_id) or self.private_review(message.guild) is not channel:
+                    return
+                evidence_url = getattr(uploaded, 'jump_url', None)
+                if isinstance(evidence_url, str) and evidence_url:
+                    embed.add_field(name='Evidence', value=f'[View images]({evidence_url})', inline=False)
+                await asyncio.wait_for(channel.send(embed=embed, allowed_mentions=nextcord.AllowedMentions.none()), REST_TIMEOUT)
+            except (nextcord.HTTPException, asyncio.TimeoutError):
+                log.warning('Scam test evidence upload failed: message=%s', job.message_id)
+            finally:
+                for file in files:
+                    file.close()
+        log.warning('Scam test matched: message=%s images=%s (no action)', job.message_id, len(evidence))
+
+    async def process(self, job):
+        m = await self.fetch(job)
+        if m is None or not self.eligible(m) or not any(is_visual_attachment(a) for a in m.attachments):
+            return
+        before = signature(m)
+        evidence = []
+        testing = self.test_mode()
+        if testing:
+            # Collect all confirmed images, not just the first, for test review.
+            try:
+                match, digest = await asyncio.wait_for(self.assess(m, evidence=evidence, all_matches=True), SCAN_BUDGET)
+            except asyncio.TimeoutError:
+                log.warning('Scam test scan budget exhausted: message=%s', job.message_id)
+            if evidence:
+                await self.post_test_review(m, job, evidence)
+            return
+        match, digest = await asyncio.wait_for(self.assess(m, evidence=evidence), SCAN_BUDGET)
+        if match is None:
+            return
+        dry = self.config('scam_detector_dry_run', True) is not False
+        review_only = not match.delete or report_context(m.content)
+        if dry or review_only:
+            log.warning('Scam %s: guild=%s channel=%s message=%s reason=%s', 'dry-run would remove and timeout for 7 days (Scam)' if dry and not review_only else 'review only', job.guild_id, job.channel_id, job.message_id, match.reason)
+            return
+        # A private audit destination must be available before enforcement.
+        channel = self.private_review(m.guild)
+        if channel is None:
+            log.warning('Scam matched but private review channel unavailable: message=%s', job.message_id)
+            return
+        if not evidence:
+            log.warning('Scam matched but evidence unavailable: message=%s', job.message_id)
+            return
+        image, suffix = evidence[0]
+        embed = nextcord.Embed(title='Scam Detected', description='Action pending', color=0xED4245)
+        embed.add_field(name='Member', value=f'<@{m.author.id}> (`{m.author.id}`)', inline=False)
+        embed.add_field(name='Channel', value=f'<#{job.channel_id}>', inline=False)
+        embed.add_field(name='Message ID', value=str(job.message_id), inline=False)
+        embed.add_field(name='Reason', value=SCAM_REASON, inline=False)
+        embed.add_field(name='Evidence', value={
+            'known campaign screenshot': 'Known casino scam image',
+            'near-identical known campaign screenshot': 'Known casino scam image (modified copy)',
+            'celebrity crypto-casino promotion': 'Celebrity casino scam image',
+            'known casino payout/bonus screenshot': 'Casino payout or bonus scam image',
+        }.get(match.reason, 'Scam image'), inline=False)
+        # Upload the exact bytes used for the verdict before the original disappears.
+        file = nextcord.File(BytesIO(image), filename=f'scam-{job.message_id}{suffix}')
+        try:
+            uploaded = await asyncio.wait_for(channel.send(file=file, allowed_mentions=nextcord.AllowedMentions.none()), REST_TIMEOUT)
+        finally:
+            file.close()
+        if self.test_mode() or not self.eligible(m) or self.config('scam_detector_dry_run', True) is not False or self.private_review(m.guild) is not channel:
+            return
+        evidence_url = getattr(uploaded, 'jump_url', None)
+        if isinstance(evidence_url, str) and evidence_url:
+            embed.add_field(name='Image', value=f'[View image]({evidence_url})', inline=False)
+        audit = await asyncio.wait_for(channel.send(embed=embed, allowed_mentions=nextcord.AllowedMentions.none()), REST_TIMEOUT)
+        # Re-fetch after audit send. Never delete a changed message on stale evidence.
+        outcome = 'Skipped: message changed or exemption applies'
+        timeout_outcome = 'Not attempted: deletion not confirmed'
+        try:
+            fresh = await self.fetch(job)
+            if not self.test_mode() and fresh is not None and self.eligible(fresh) and any(is_visual_attachment(a) for a in fresh.attachments) and signature(fresh) == before and not report_context(fresh.content) and self.config('scam_detector_dry_run', True) is False and self.private_review(fresh.guild) is not None:
+                await asyncio.wait_for(fresh.delete(), REST_TIMEOUT)
+                outcome = 'Removed by APBot'
+                timeout_outcome = await self.timeout_sender(fresh)
+        except nextcord.NotFound:
+            outcome = 'Already removed (not attributed to APBot)'
+        except (nextcord.HTTPException, asyncio.TimeoutError):
+            outcome = 'Deletion failed or unconfirmed'
+        finally:
+            log.warning('Scam action: message=%s outcome=%s timeout=%s', job.message_id, outcome, timeout_outcome)
+            embed.description = outcome
+            embed.add_field(name='Messages Deleted', value='1' if outcome == 'Removed by APBot' else 'Unconfirmed' if outcome == 'Deletion failed or unconfirmed' else '0', inline=False)
+            embed.add_field(name='Timeout', value=timeout_outcome, inline=False)
+            try:
+                await asyncio.wait_for(audit.edit(embed=embed), REST_TIMEOUT)
+            except (nextcord.HTTPException, asyncio.TimeoutError):
+                log.warning('Scam audit update failed: message=%s', job.message_id)
 
 
-def setup(bot: APBot) -> None:
+def setup(bot):
     bot.add_cog(ScamImageDetector(bot))
